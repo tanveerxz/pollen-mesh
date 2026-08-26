@@ -15,10 +15,15 @@ import {
   buildFeed,
   getHealth,
   getMatches,
+  getMode,
+  getOrgs,
   getOrgStatus,
   getSignatures,
+  registerOrgLabel,
+  setMode as apiSetMode,
   type FeedEvent,
   type MatchRecord,
+  type OrgRecord,
   type OrgStatus,
   type SignatureRecord,
 } from "./api";
@@ -29,6 +34,11 @@ export type Link = "connecting" | "online" | "offline";
 
 interface SystemState {
   link: Link;
+  demoMode: boolean;
+  /** Every known org (demo orgs always; real orgs once they register/submit). */
+  orgs: OrgRecord[];
+  /** Ids to iterate for demo views — demo orgs, or all orgs in real mode. */
+  orgIds: string[];
   signatures: SignatureRecord[];
   matches: MatchRecord[];
   orgStatuses: Record<string, OrgStatus>;
@@ -39,12 +49,15 @@ interface SystemState {
   /** Signature ids that arrived since the previous poll — drives arrival animations. */
   arrivals: SignatureRecord[];
   refresh: () => void;
+  setDemoMode: (on: boolean) => Promise<void>;
 }
 
 const SystemContext = createContext<SystemState | null>(null);
 
 export function SystemProvider({ children }: { children: ReactNode }) {
   const [link, setLink] = useState<Link>("connecting");
+  const [demoMode, setDemoModeState] = useState<boolean>(true);
+  const [orgs, setOrgs] = useState<OrgRecord[]>([]);
   const [signatures, setSignatures] = useState<SignatureRecord[]>([]);
   const [matches, setMatches] = useState<MatchRecord[]>([]);
   const [orgStatuses, setOrgStatuses] = useState<Record<string, OrgStatus>>({});
@@ -58,11 +71,21 @@ export function SystemProvider({ children }: { children: ReactNode }) {
   const tick = useCallback(async () => {
     try {
       await getHealth();
-      const [sigs, ms, ...statuses] = await Promise.all([
+      const [modeRes, orgList, sigs, ms] = await Promise.all([
+        getMode(),
+        getOrgs(),
         getSignatures(),
         getMatches(),
-        ...ORG_IDS.map((id) => getOrgStatus(id)),
       ]);
+
+      setDemoModeState(modeRes.demo_mode);
+      setOrgs(orgList);
+      for (const o of orgList) registerOrgLabel(o.org_id, o.label);
+
+      // Status for every known org plus the demo trio (union keeps demo views
+      // populated even before an org has submitted anything).
+      const ids = Array.from(new Set([...ORG_IDS, ...orgList.map((o) => o.org_id)]));
+      const statuses = await Promise.all(ids.map((id) => getOrgStatus(id)));
 
       const fresh = sigs.filter((s) => !seenSignatureIds.current.has(s.id));
       for (const s of sigs) seenSignatureIds.current.add(s.id);
@@ -111,10 +134,24 @@ export function SystemProvider({ children }: { children: ReactNode }) {
     return () => clearTimeout(id);
   }, [arrivals]);
 
+  const setDemoMode = useCallback(async (on: boolean) => {
+    const res = await apiSetMode(on);
+    setDemoModeState(res.demo_mode);
+    void tickRef.current();
+  }, []);
+
   const value = useMemo<SystemState>(() => {
     const feed = buildFeed(signatures, matches);
+    // In demo mode iterate the three demo orgs; in real mode iterate whatever
+    // real orgs have actually registered/submitted.
+    const orgIds = demoMode
+      ? [...ORG_IDS]
+      : orgs.filter((o) => o.kind === "real").map((o) => o.org_id);
     return {
       link,
+      demoMode,
+      orgs,
+      orgIds,
       signatures,
       matches,
       orgStatuses,
@@ -126,8 +163,9 @@ export function SystemProvider({ children }: { children: ReactNode }) {
       lastSyncedAt,
       arrivals,
       refresh: () => void tick(),
+      setDemoMode,
     };
-  }, [link, signatures, matches, orgStatuses, lastSyncedAt, arrivals, tick]);
+  }, [link, demoMode, orgs, signatures, matches, orgStatuses, lastSyncedAt, arrivals, tick, setDemoMode]);
 
   return <SystemContext.Provider value={value}>{children}</SystemContext.Provider>;
 }

@@ -14,9 +14,13 @@ from server.matching import process_new_signature
 from server.models import (
     AgentRunRequest,
     AttackLaunchRequest,
+    CustomAttackRequest,
     LocalActionRequest,
     MatchRecord,
     MatchStatus,
+    ModeRequest,
+    OrgRecord,
+    OrgRegisterRequest,
     OrgStatus,
     SignatureCreate,
     SignatureRecord,
@@ -42,9 +46,50 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _require_demo_mode() -> None:
+    """Guard endpoints that fabricate or drive the demo orgs."""
+    if not store.demo_mode:
+        raise HTTPException(
+            status_code=403,
+            detail="Not available in real mode — the attack console and local "
+            "agent runner only exist for the demo orgs.",
+        )
+
+
 @app.get("/")
 def health() -> dict[str, str]:
     return {"status": "ok", "service": "pollen-mesh-server"}
+
+
+@app.get("/api/mode")
+def get_mode() -> dict[str, bool]:
+    return {"demo_mode": store.demo_mode}
+
+
+@app.post("/api/mode")
+def set_mode(payload: ModeRequest) -> dict[str, bool]:
+    store.demo_mode = payload.demo_mode
+    return {"demo_mode": store.demo_mode}
+
+
+@app.get("/api/orgs", response_model=list[OrgRecord])
+def list_orgs() -> list[OrgRecord]:
+    return list(store.orgs.values())
+
+
+@app.post("/api/orgs", response_model=OrgRecord)
+def register_org(payload: OrgRegisterRequest) -> OrgRecord:
+    """Register a real, external org (or rename one). Demo orgs are protected."""
+    existing = store.orgs.get(payload.org_id)
+    if existing is not None and existing.kind == "demo":
+        raise HTTPException(status_code=409, detail="That is a reserved demo org id")
+    record = OrgRecord(
+        org_id=payload.org_id,
+        label=payload.label or payload.org_id,
+        kind="real",
+    )
+    store.orgs[payload.org_id] = record
+    return record
 
 
 @app.post("/api/demo/reset")
@@ -56,10 +101,12 @@ def demo_reset(restore_logs: bool = True) -> dict[str, object]:
     (§5.2), so this just does explicitly what a restart does implicitly. Also
     rewinds each org's log file to its pre-attack baseline unless asked not to.
     """
+    _require_demo_mode()
     cleared_signatures = len(store.signatures)
     cleared_matches = len(store.matches)
     store.signatures.clear()
     store.matches.clear()
+    store.reset_orgs()
     restored = attacks.restore_logs(list(ORG_IDS)) if restore_logs else {}
     return {
         "cleared_signatures": cleared_signatures,
@@ -75,6 +122,7 @@ def run_agents(payload: AgentRunRequest) -> dict[str, object]:
     Shells out to the same `flwr run` a human would type, in that org's own
     project directory. Returns immediately — poll /api/agents for progress.
     """
+    _require_demo_mode()
     started: dict[str, object] = {}
     for org_id in payload.org_ids:
         try:
@@ -96,21 +144,15 @@ def list_attacks() -> list[dict[str, object]]:
     return [attacks.scenario_summary(s) for s in attacks.SCENARIOS]
 
 
-@app.post("/api/attacks/{scenario_id}/launch")
-def launch_attack(scenario_id: str, payload: AttackLaunchRequest) -> dict[str, object]:
-    """Deliver an attack into the targeted orgs' own local logs.
-
-    Always writes real rows. In `demo` mode it additionally runs the rule-based
-    detector (see attacks.py) and submits the resulting signatures through the
-    same internal path as a live agent, so correlation is genuinely computed.
-    """
-    scenario = attacks.SCENARIOS_BY_ID.get(scenario_id)
-    if scenario is None:
-        raise HTTPException(status_code=404, detail="Unknown attack scenario")
-
-    started = attacks.utc_now()
-    per_org = attacks.build_rows(scenario, started)
-
+def _deliver_attack(
+    per_org: dict[str, list[dict[str, str]]],
+    mode: str,
+    scenario_id: str,
+    name: str,
+    started_iso: str,
+) -> dict[str, object]:
+    """Shared path for built-in and custom attacks: write rows, and in demo
+    mode run the stand-in detector and submit through the public signature path."""
     written: dict[str, int] = {}
     for org_id, rows in per_org.items():
         try:
@@ -121,7 +163,7 @@ def launch_attack(scenario_id: str, payload: AttackLaunchRequest) -> dict[str, o
     detected: list[dict[str, object]] = []
     match_ids: set[str] = set()
 
-    if payload.mode == "demo":
+    if mode == "demo":
         for org_id, rows in per_org.items():
             for row in rows:
                 verdict = attacks.analyse_row(row)
@@ -149,15 +191,57 @@ def launch_attack(scenario_id: str, payload: AttackLaunchRequest) -> dict[str, o
                 )
 
     return {
-        "scenario_id": scenario.id,
-        "name": scenario.name,
-        "mode": payload.mode,
-        "launched_at": started.isoformat(),
+        "scenario_id": scenario_id,
+        "name": name,
+        "mode": mode,
+        "launched_at": started_iso,
         "rows_written": written,
-        "org_ids": scenario.org_ids,
+        "org_ids": list(per_org.keys()),
         "detected": detected,
         "match_ids": sorted(match_ids),
     }
+
+
+@app.post("/api/attacks/custom/launch")
+def launch_custom_attack(payload: CustomAttackRequest) -> dict[str, object]:
+    """Build and deliver a custom attack — either explicit steps, or the
+    shorthand org_ids + indicator. Demo-mode only, same honest pipeline.
+
+    Declared before the {scenario_id} route so 'custom' isn't captured as an id.
+    """
+    _require_demo_mode()
+    started = attacks.utc_now()
+    try:
+        per_org = attacks.build_custom_rows(payload, started)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    if not per_org:
+        raise HTTPException(status_code=422, detail="Custom attack produced no rows")
+    return _deliver_attack(
+        per_org, payload.mode, "custom", payload.name, started.isoformat()
+    )
+
+
+@app.post("/api/attacks/{scenario_id}/launch")
+def launch_attack(scenario_id: str, payload: AttackLaunchRequest) -> dict[str, object]:
+    """Deliver a built-in attack into the targeted orgs' own local logs.
+
+    Always writes real rows. In `demo` mode it additionally runs the rule-based
+    detector (see attacks.py) and submits the resulting signatures through the
+    same internal path as a live agent, so correlation is genuinely computed.
+    """
+    _require_demo_mode()
+    scenario = attacks.SCENARIOS_BY_ID.get(scenario_id)
+    if scenario is None:
+        raise HTTPException(status_code=404, detail="Unknown attack scenario")
+
+    started = attacks.utc_now()
+    per_org = attacks.build_rows(scenario, started)
+    result = _deliver_attack(
+        per_org, payload.mode, scenario.id, scenario.name, started.isoformat()
+    )
+    result["org_ids"] = scenario.org_ids  # declared targets, even if a row wrote nothing
+    return result
 
 
 def _store_signature(payload: SignatureCreate) -> tuple[SignatureRecord, str | None]:
@@ -172,6 +256,7 @@ def _store_signature(payload: SignatureCreate) -> tuple[SignatureRecord, str | N
         confidence=payload.confidence,
         received_at=_now(),
     )
+    store.ensure_org(record.org_id)  # unknown submitter -> registered as a real org
     store.signatures.append(record)
     return record, process_new_signature(record)
 
@@ -253,10 +338,13 @@ def org_status(org_id: str) -> OrgStatus:
         for m in store.matches.values()
         if m.status == "pending" and org_id in m.org_ids
     )
+    record = store.orgs.get(org_id)
     return OrgStatus(
         org_id=org_id,
         signature_count=signature_count,
         pending_match_count=pending_match_count,
+        kind=record.kind if record else "real",
+        label=record.label if record else org_id,
     )
 
 

@@ -311,6 +311,49 @@ def build_rows(
 LaunchMode = Literal["real", "demo"]
 
 
+def build_custom_rows(
+    req: "CustomAttackReqLike", started: datetime
+) -> dict[str, list[dict[str, str]]]:
+    """Materialise a custom attack request into per-org rows.
+
+    Two shapes: explicit `steps`, or the shorthand `org_ids` + `indicator`
+    (+ optional `detail`), which synthesises one encoded-PowerShell beacon row
+    per org — enough to exercise a shared-indicator correlation across the
+    chosen orgs. Timestamps are launch-relative like the built-in scenarios.
+    """
+    out: dict[str, list[dict[str, str]]] = {}
+
+    if req.steps:
+        for step in req.steps:
+            ts = started + timedelta(seconds=step.offset_seconds)
+            out.setdefault(step.org_id, []).append(
+                {
+                    "timestamp": ts.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                    "source_process": step.source_process,
+                    "event_type": step.event_type,
+                    "detail": step.detail,
+                }
+            )
+        return out
+
+    indicator = (req.indicator or "").strip()
+    if not indicator or not req.org_ids:
+        raise ValueError("custom attack needs either steps, or org_ids + indicator")
+
+    detail_suffix = req.detail or "parent=winword.exe, encoded command flag present"
+    for i, org_id in enumerate(req.org_ids):
+        ts = started + timedelta(seconds=i * 180)
+        out.setdefault(org_id, []).append(
+            {
+                "timestamp": ts.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                "source_process": "powershell.exe",
+                "event_type": "network_connection",
+                "detail": f"outbound TCP 443 to {indicator}, {detail_suffix}",
+            }
+        )
+    return out
+
+
 def scenario_summary(s: AttackScenario) -> dict[str, object]:
     return {
         "id": s.id,

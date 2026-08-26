@@ -6,6 +6,7 @@ import {
   getAttacks,
   getOrgLog,
   launchAttack,
+  launchCustomAttack,
   orgLabel,
   ORG_IDS,
   type AttackScenario,
@@ -17,7 +18,7 @@ import { useSystem } from "@/lib/system-context";
 import { useDemo } from "@/lib/demo-context";
 
 export default function AttackConsolePage() {
-  const { signatures, matches, refresh } = useSystem();
+  const { signatures, matches, refresh, demoMode } = useSystem();
   const { markSimulated, reset, busy: demoBusy } = useDemo();
 
   const [scenarios, setScenarios] = useState<AttackScenario[]>([]);
@@ -26,6 +27,11 @@ export default function AttackConsolePage() {
   const [result, setResult] = useState<LaunchResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [logs, setLogs] = useState<Record<string, LogRow[]>>({});
+
+  // custom-attack builder
+  const [customOrgs, setCustomOrgs] = useState<string[]>(["org_a", "org_b"]);
+  const [customIndicator, setCustomIndicator] = useState("");
+  const [customName, setCustomName] = useState("Custom scenario");
 
   useEffect(() => {
     getAttacks()
@@ -73,6 +79,66 @@ export default function AttackConsolePage() {
     await reset();
     void loadLogs();
   };
+
+  const onLaunchCustom = async () => {
+    if (customOrgs.length === 0 || !customIndicator.trim()) {
+      setError("Pick at least one org and enter an indicator.");
+      return;
+    }
+    setLaunching("custom");
+    setError(null);
+    try {
+      const res = await launchCustomAttack({
+        name: customName.trim() || "Custom scenario",
+        mode,
+        org_ids: customOrgs,
+        indicator: customIndicator.trim(),
+      });
+      setResult(res);
+      markSimulated(res.detected.map((d) => d.signature_id));
+      refresh();
+      void loadLogs();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setLaunching(null);
+    }
+  };
+
+  const toggleCustomOrg = (id: string) =>
+    setCustomOrgs((prev) =>
+      prev.includes(id) ? prev.filter((o) => o !== id) : [...prev, id],
+    );
+
+  if (!demoMode) {
+    return (
+      <div className="mx-auto w-full max-w-[720px] flex-1 px-6 py-10">
+        <header className="rise">
+          <h1 className="text-[clamp(1.6rem,3vw,2.2rem)] font-semibold tracking-[-0.02em]">
+            Attack console
+          </h1>
+          <p className="mt-1.5 text-[14px] leading-relaxed text-fg-muted">
+            The attack console only exists in <strong className="text-fg">demo mode</strong>.
+            It fabricates attacks against the three demo orgs so there is something to
+            correlate on a laptop.
+          </p>
+        </header>
+        <div className="panel mt-6 p-5 rise">
+          <p className="text-[13.5px] leading-relaxed text-fg-muted">
+            You are in <strong className="text-fg">real mode</strong>. Real organisations
+            run their own Flower agent on their own infrastructure and only ever POST a
+            stripped signature in — nothing here injects events into their logs. The
+            server is a passive correlator: it names each org that reports, matches
+            across them, and holds every disclosure for human approval, exactly as in
+            the demo.
+          </p>
+          <p className="mt-3 text-[12.5px] text-fg-subtle">
+            Switch back to demo mode (top-right) to drive the three demo orgs locally.
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="mx-auto w-full max-w-[1180px] flex-1 px-6 py-10">
@@ -194,6 +260,79 @@ export default function AttackConsolePage() {
             </button>
           </article>
         ))}
+      </section>
+
+      {/* custom builder */}
+      <section className="panel mt-4 p-5 rise">
+        <div className="flex items-center gap-2">
+          <span className="label">Build your own</span>
+          <span className="chip chip-idle ml-auto">{mode === "real" ? "real agents" : "simulated"}</span>
+        </div>
+        <p className="mt-1.5 text-[12.5px] leading-relaxed text-fg-muted">
+          Pick which demo orgs get hit and the shared attacker indicator they all
+          reach. Each selected org gets one encoded-PowerShell beacon row to that
+          indicator — so two or more orgs correlate on its hash, exactly like the
+          built-in campaign, but with values you choose.
+        </p>
+
+        <div className="mt-3 flex flex-wrap items-end gap-4">
+          <div>
+            <p className="label mb-1.5">Target orgs</p>
+            <div className="flex gap-1.5">
+              {ORG_IDS.map((id) => (
+                <button
+                  key={id}
+                  onClick={() => toggleCustomOrg(id)}
+                  className={`rounded-lg border px-3 py-1.5 text-[12.5px] transition ${
+                    customOrgs.includes(id)
+                      ? "border-fg bg-fg text-canvas"
+                      : "border-line text-fg-muted hover:text-fg"
+                  }`}
+                >
+                  {orgLabel(id)}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="min-w-[220px] flex-1">
+            <label className="label mb-1.5 block" htmlFor="cust-ind">
+              Shared indicator
+            </label>
+            <input
+              id="cust-ind"
+              value={customIndicator}
+              onChange={(e) => setCustomIndicator(e.target.value)}
+              placeholder="evil-c2-domain.net"
+              className="mono w-full rounded-lg border border-line bg-surface px-3 py-2 text-[13px] outline-none focus:border-fg-subtle"
+            />
+          </div>
+
+          <div className="min-w-[160px]">
+            <label className="label mb-1.5 block" htmlFor="cust-name">
+              Name
+            </label>
+            <input
+              id="cust-name"
+              value={customName}
+              onChange={(e) => setCustomName(e.target.value)}
+              className="w-full rounded-lg border border-line bg-surface px-3 py-2 text-[13px] outline-none focus:border-fg-subtle"
+            />
+          </div>
+
+          <button
+            className="btn btn-primary"
+            disabled={launching !== null || customOrgs.length === 0 || !customIndicator.trim()}
+            onClick={() => void onLaunchCustom()}
+          >
+            {launching === "custom" ? "Delivering…" : "Launch custom"}
+          </button>
+        </div>
+        {customOrgs.length < 2 && (
+          <p className="mt-2 text-[11.5px] text-fg-subtle">
+            One org alone won&apos;t correlate — pick two or more to see a match form.
+          </p>
+        )}
       </section>
 
       {/* result */}

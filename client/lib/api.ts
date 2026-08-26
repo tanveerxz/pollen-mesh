@@ -31,10 +31,20 @@ export interface MatchRecord {
   local_actions: Record<string, LocalActionState>;
 }
 
+export type OrgKind = "demo" | "real";
+
 export interface OrgStatus {
   org_id: string;
   signature_count: number;
   pending_match_count: number;
+  kind: OrgKind;
+  label: string;
+}
+
+export interface OrgRecord {
+  org_id: string;
+  label: string;
+  kind: OrgKind;
 }
 
 export interface LogRow {
@@ -44,6 +54,8 @@ export interface LogRow {
   detail: string;
 }
 
+// The demo orgs this repo can drive locally. Real orgs are external and arrive
+// via the /api/orgs registry at runtime — see SystemProvider.
 export const ORG_IDS = ["org_a", "org_b", "org_c"] as const;
 export type OrgId = (typeof ORG_IDS)[number];
 
@@ -52,6 +64,11 @@ export const ORG_LABELS: Record<string, string> = {
   org_b: "Meridian Logistics",
   org_c: "Halcyon Health",
 };
+
+// Mutated at runtime from the /api/orgs registry so real orgs get a name too.
+export function registerOrgLabel(orgId: string, label: string): void {
+  if (label && label !== orgId) ORG_LABELS[orgId] = label;
+}
 
 export function orgLabel(orgId: string): string {
   return ORG_LABELS[orgId] ?? orgId;
@@ -90,6 +107,22 @@ async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
 
 export const getHealth = () =>
   apiFetch<{ status: string; service: string }>("/");
+
+export const getMode = () => apiFetch<{ demo_mode: boolean }>("/api/mode");
+
+export const setMode = (demoMode: boolean) =>
+  apiFetch<{ demo_mode: boolean }>("/api/mode", {
+    method: "POST",
+    body: JSON.stringify({ demo_mode: demoMode }),
+  });
+
+export const getOrgs = () => apiFetch<OrgRecord[]>("/api/orgs");
+
+export const registerOrg = (orgId: string, label?: string) =>
+  apiFetch<OrgRecord>("/api/orgs", {
+    method: "POST",
+    body: JSON.stringify({ org_id: orgId, label: label ?? null }),
+  });
 
 export const getOrgStatus = (orgId: string) =>
   apiFetch<OrgStatus>(`/api/orgs/${orgId}/status`);
@@ -233,6 +266,21 @@ export const launchAttack = (scenarioId: string, mode: LaunchMode) =>
   apiFetch<LaunchResult>(`/api/attacks/${scenarioId}/launch`, {
     method: "POST",
     body: JSON.stringify({ mode }),
+  });
+
+export interface CustomAttackPayload {
+  name?: string;
+  mode?: LaunchMode;
+  org_ids?: string[];
+  indicator?: string;
+  detail?: string;
+}
+
+/** Build an attack on the fly: pick target orgs + a shared indicator. */
+export const launchCustomAttack = (payload: CustomAttackPayload) =>
+  apiFetch<LaunchResult>("/api/attacks/custom/launch", {
+    method: "POST",
+    body: JSON.stringify({ mode: "demo", ...payload }),
   });
 
 /* ---------------- derived view helpers ---------------- */

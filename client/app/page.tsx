@@ -30,7 +30,7 @@ import { Act, ActChip, type ActState } from "@/components/story";
 import { AgentLive } from "@/components/agent-live";
 
 export default function Home() {
-  const { link, signatures, matches, orgStatuses, refresh } = useSystem();
+  const { link, signatures, matches, orgStatuses, refresh, demoMode } = useSystem();
   const { markSimulated, reset, busy: demoBusy } = useDemo();
 
   const [scenarios, setScenarios] = useState<AttackScenario[]>([]);
@@ -258,6 +258,17 @@ export default function Home() {
             />
           }
         >
+          {!demoMode ? (
+            <div className="panel p-4">
+              <p className="text-[13px] font-medium">Real mode — no attack console.</p>
+              <p className="mt-1 text-[12.5px] leading-relaxed text-fg-muted">
+                Real organisations run their own Flower agent on their own
+                infrastructure and submit signatures on their own. The server just
+                correlates whatever arrives. Switch to demo mode (top-right) to inject
+                attacks against the three demo orgs.
+              </p>
+            </div>
+          ) : (
           <div className="panel p-4">
             <div className="mb-3 flex flex-wrap items-center gap-3">
               <span className="label">Detection</span>
@@ -377,6 +388,7 @@ export default function Home() {
               </div>
             )}
           </div>
+          )}
         </Act>
 
         <div id="act-3" className="scroll-mt-24">

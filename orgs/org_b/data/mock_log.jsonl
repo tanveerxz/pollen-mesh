@@ -4,11 +4,3 @@
 {"timestamp": "2026-08-26T09:35:40Z", "source_process": "chrome.exe", "event_type": "network_connection", "detail": "outbound TCP 443 to news-aggregator.com, browsing"}
 {"timestamp": "2026-08-26T09:58:00Z", "source_process": "svchost.exe", "event_type": "network_connection", "detail": "outbound TCP 443 to windowsupdate.microsoft.com, routine"}
 {"timestamp": "2026-08-26T10:15:30Z", "source_process": "slack.exe", "event_type": "network_connection", "detail": "outbound TCP 443 to slack.com, routine"}
-{"timestamp": "2026-08-26T13:07:20Z", "source_process": "outlook.exe", "event_type": "file_access", "detail": "opened attachment Renewal_Q3.docm from external sender"}
-{"timestamp": "2026-08-26T13:08:10Z", "source_process": "winword.exe", "event_type": "process_create", "detail": "spawned powershell.exe with base64-encoded command line, unusual parent chain"}
-{"timestamp": "2026-08-26T13:08:40Z", "source_process": "powershell.exe", "event_type": "network_connection", "detail": "outbound TCP 443 to secure-update-delivery.net, parent=winword.exe, encoded command flag present"}
-{"timestamp": "2026-08-26T13:13:40Z", "source_process": "slack.exe", "event_type": "network_connection", "detail": "outbound TCP 443 to slack.com, routine"}
-{"timestamp": "2026-08-26T13:12:22Z", "source_process": "outlook.exe", "event_type": "file_access", "detail": "opened attachment Renewal_Q3.docm from external sender"}
-{"timestamp": "2026-08-26T13:13:12Z", "source_process": "winword.exe", "event_type": "process_create", "detail": "spawned powershell.exe with base64-encoded command line, unusual parent chain"}
-{"timestamp": "2026-08-26T13:13:42Z", "source_process": "powershell.exe", "event_type": "network_connection", "detail": "outbound TCP 443 to secure-update-delivery.net, parent=winword.exe, encoded command flag present"}
-{"timestamp": "2026-08-26T13:18:42Z", "source_process": "slack.exe", "event_type": "network_connection", "detail": "outbound TCP 443 to slack.com, routine"}

@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useDemo } from "@/lib/demo-context";
@@ -15,7 +16,7 @@ const LINKS = [
 
 export function Nav() {
   const pathname = usePathname();
-  const { link, pendingMatches } = useSystem();
+  const { link, pendingMatches, demoMode, setDemoMode } = useSystem();
   const { presenting, start, stop } = useDemo();
 
   return (
@@ -54,6 +55,7 @@ export function Nav() {
               awaiting approval
             </span>
           )}
+          <ModeToggle demoMode={demoMode} onToggle={setDemoMode} />
           <LinkStatus state={link} />
           <button
             type="button"
@@ -66,6 +68,43 @@ export function Nav() {
         </div>
       </div>
     </header>
+  );
+}
+
+function ModeToggle({
+  demoMode,
+  onToggle,
+}: {
+  demoMode: boolean;
+  onToggle: (on: boolean) => Promise<void>;
+}) {
+  const [busy, setBusy] = useState(false);
+  const handle = async () => {
+    setBusy(true);
+    try {
+      await onToggle(!demoMode);
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <button
+      type="button"
+      onClick={handle}
+      disabled={busy}
+      title={
+        demoMode
+          ? "Demo mode: the three demo orgs, the attack console, and the local agent runner are available. Click to switch to real mode."
+          : "Real mode: passive correlator for external orgs. The attack console and local runner are hidden. Click to switch back to demo mode."
+      }
+      className="hidden items-center gap-2 rounded-lg border border-line px-2.5 py-1 text-[12.5px] transition hover:text-fg sm:inline-flex disabled:opacity-50"
+    >
+      <span
+        className="dot"
+        style={{ background: demoMode ? "var(--hold)" : "var(--local)" }}
+      />
+      <span className="label">{demoMode ? "demo mode" : "real mode"}</span>
+    </button>
   );
 }
 
