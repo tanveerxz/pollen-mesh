@@ -47,9 +47,11 @@ export function AgentLive({ run }: { run: AgentRun }) {
           className={`chip ml-auto ${
             run.status === "failed"
               ? "chip-crossed"
-              : running
-                ? "chip-hold"
-                : "chip-local"
+              : run.status === "stopped"
+                ? "chip-idle"
+                : running
+                  ? "chip-hold"
+                  : "chip-local"
           }`}
         >
           {running && (
@@ -58,7 +60,13 @@ export function AgentLive({ run }: { run: AgentRun }) {
               style={{ background: "var(--hold)", color: "var(--hold)" }}
             />
           )}
-          {running ? "thinking" : run.status === "failed" ? "failed" : "done"}
+          {running
+            ? "thinking"
+            : run.status === "failed"
+              ? "failed"
+              : run.status === "stopped"
+                ? "aborted"
+                : "done"}
         </span>
       </div>
 
@@ -68,7 +76,11 @@ export function AgentLive({ run }: { run: AgentRun }) {
             className="h-0.5 transition-all duration-700"
             style={{
               width: `${progress}%`,
-              background: running ? "var(--hold)" : "var(--local)",
+              background: running
+                ? "var(--hold)"
+                : run.status === "stopped"
+                  ? "var(--fg-subtle)"
+                  : "var(--local)",
             }}
           />
         </div>

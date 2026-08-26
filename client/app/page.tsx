@@ -12,6 +12,7 @@ import {
   huntOrg,
   launchAttack,
   runAgents,
+  stopAgents,
   orgLabel,
   postLocalAction,
   rejectMatch,
@@ -75,6 +76,19 @@ export default function Home() {
     const t = setInterval(poll, 1500);
     return () => clearInterval(t);
   }, []);
+
+  const onStopAgents = async () => {
+    setStartingAgents(true);
+    setError(null);
+    try {
+      const r = await stopAgents();
+      setAgentRuns(r.runs);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setStartingAgents(false);
+    }
+  };
 
   const onRunAgents = async (orgIds: string[]) => {
     setStartingAgents(true);
@@ -414,7 +428,20 @@ export default function Home() {
                     ? "Real Flower agents running — each reading only its own log"
                     : "Agents finished"}
                 </span>
-                {!anyRunning && (
+                {anyRunning ? (
+                  <button
+                    className="btn btn-sm ml-auto"
+                    disabled={startingAgents}
+                    onClick={() => void onStopAgents()}
+                    title="Stops the run on the SuperLink too, so no further signatures are submitted"
+                    style={{
+                      borderColor: "var(--crossed)",
+                      color: "var(--crossed)",
+                    }}
+                  >
+                    {startingAgents ? "Stopping…" : "Abort run"}
+                  </button>
+                ) : (
                   <button
                     className="btn btn-sm ml-auto"
                     disabled={startingAgents}

@@ -243,7 +243,7 @@ export interface AgentEvent {
 
 export interface AgentRun {
   org_id: string;
-  status: "running" | "finished" | "failed";
+  status: "running" | "finished" | "failed" | "stopped";
   started_at: string;
   finished_at: string | null;
   rows_total: number | null;
@@ -261,6 +261,16 @@ export const runAgents = (orgIds: string[], model?: string) =>
 
 export const getAgentRuns = () =>
   apiFetch<{ runs: Record<string, AgentRun> }>("/api/agents");
+
+/**
+ * Abort running agents. Stops the run on the SuperLink as well as the local
+ * process, so no further signatures are submitted. Omit orgIds to stop all.
+ */
+export const stopAgents = (orgIds?: string[]) =>
+  apiFetch<{ stopped: string[]; runs: Record<string, AgentRun> }>(
+    "/api/agents/stop",
+    { method: "POST", body: JSON.stringify({ org_ids: orgIds ?? [] }) },
+  );
 
 export const launchAttack = (scenarioId: string, mode: LaunchMode) =>
   apiFetch<LaunchResult>(`/api/attacks/${scenarioId}/launch`, {

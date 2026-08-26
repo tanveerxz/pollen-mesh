@@ -1,0 +1,30 @@
+[project]
+name = "pollen-mesh-agent"
+version = "0.1.0"
+description = "Triage your own security log locally and share only a stripped, hashed signature — so cross-organization threat correlation never requires handing over raw telemetry."
+license = { file = "LICENSE" }
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "flwr>=1.35.0,<2.0",
+    "requests>=2.31.0",
+]
+
+[tool.flwr.app]
+# Must match the Flower account username used for `flwr login supergrid`.
+publisher = "tanveer"
+display-name = "Pollen Mesh Agent"
+flwr-version-target = "1.35.0"
+
+[tool.flwr.app.components]
+agentapp = "pollen_mesh_agent.agent:app"
+
+[tool.flwr.app.config.agent]
+# Identifies this organization in submitted signatures. Override per deployment.
+org_id = "my-org"
+# The log this agent is allowed to read. It reads nothing else, ever.
+log_path = "data/mock_log.jsonl"
+# Where stripped signatures are submitted. Point this at your own correlator.
+server_url = "http://localhost:8000/api/signatures"
+# Any Open-Responses-compatible model reachable from the SuperLink.
+model = "/models/Kimi-K2.7-Code"

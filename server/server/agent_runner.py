@@ -41,13 +41,17 @@ class AgentEvent:
 @dataclass
 class AgentRun:
     org_id: str
-    status: str = "running"  # running | finished | failed
+    status: str = "running"  # running | finished | failed | stopped
     started_at: str = ""
     finished_at: str | None = None
     rows_total: int | None = None
     signatures_sent: int = 0
     events: list[AgentEvent] = field(default_factory=list)
     error: str | None = None
+    # Runtime handles — never serialised to the client.
+    proc: subprocess.Popen[str] | None = field(default=None, repr=False)
+    flwr_run_id: str | None = field(default=None, repr=False)
+    stopping: bool = field(default=False, repr=False)
 
     def as_dict(self) -> dict[str, object]:
         return {
@@ -69,6 +73,9 @@ _lock = threading.Lock()
 _RE_START = re.compile(r"^\[(\w+)\] (\d+) rows from")
 _RE_ROW = re.compile(r"^\[(\w+)\] row (\d+): (.*)$")
 _RE_DONE = re.compile(r"^\[(\w+)\] done — (\d+) signature")
+# Emitted by the flwr CLI itself, not the agent — needed so an abort can stop the
+# run on the SuperLink rather than only killing our log stream.
+_RE_RUN_ID = re.compile(r"Successfully started run (\d+)")
 
 
 def _now() -> str:
@@ -98,7 +105,9 @@ def _pump(org_id: str, proc: subprocess.Popen[str]) -> None:
             continue
 
         with _lock:
-            if m := _RE_START.match(line):
+            if m := _RE_RUN_ID.search(line):
+                run.flwr_run_id = m.group(1)
+            elif m := _RE_START.match(line):
                 run.rows_total = int(m.group(2))
                 run.events.append(
                     AgentEvent(None, "start", f"Reading {m.group(2)} local events", _now())
@@ -117,7 +126,12 @@ def _pump(org_id: str, proc: subprocess.Popen[str]) -> None:
     code = proc.wait()
     with _lock:
         run.finished_at = _now()
-        if code == 0:
+        run.proc = None
+        if run.stopping:
+            # Operator aborted — a non-zero exit here is expected, not a failure.
+            run.status = "stopped"
+            run.events.append(AgentEvent(None, "done", "Stopped by operator", _now()))
+        elif code == 0:
             run.status = "finished"
         else:
             run.status = "failed"
@@ -166,9 +180,59 @@ def start(org_id: str, model: str | None = None) -> AgentRun:
             run.finished_at = _now()
         return runs[org_id]
 
+    with _lock:
+        runs[org_id].proc = proc
+
     threading.Thread(target=_pump, args=(org_id, proc), daemon=True).start()
     return runs[org_id]
 
+
+def stop(org_id: str) -> AgentRun | None:
+    """Abort a running agent.
+
+    Two steps, and the order matters. Killing our `flwr run` child only ends the
+    log stream — the run itself keeps executing on the SuperLink and would carry
+    on submitting signatures, so "abort" would be a lie. Ask the SuperLink to
+    stop the run first (`flwr stop <run_id>`), then terminate the local process.
+    """
+    with _lock:
+        run = runs.get(org_id)
+        if run is None or run.status != "running":
+            return run
+        run.stopping = True
+        proc = run.proc
+        flwr_run_id = run.flwr_run_id
+
+    if flwr_run_id:
+        try:
+            subprocess.run(
+                ["flwr", "stop", flwr_run_id],
+                cwd=str(REPO_ROOT / "orgs" / org_id),
+                capture_output=True,
+                timeout=25,
+                env={**os.environ, "PYTHONIOENCODING": "utf-8"},
+            )
+        except Exception:  # noqa: BLE001 - best effort; we still kill locally
+            pass
+
+    if proc is not None and proc.poll() is None:
+        proc.terminate()
+        try:
+            proc.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+
+    with _lock:
+        return runs.get(org_id)
+
+
+def stop_all() -> list[str]:
+    """Abort every running agent. Returns the org ids that were stopped."""
+    with _lock:
+        targets = [o for o, r in runs.items() if r.status == "running"]
+    for org_id in targets:
+        stop(org_id)
+    return targets
 
 def snapshot() -> dict[str, dict[str, object]]:
     with _lock:

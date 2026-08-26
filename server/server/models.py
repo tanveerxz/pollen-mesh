@@ -119,3 +119,9 @@ class CustomAttackRequest(BaseModel):
     indicator: str | None = None
     detail: str | None = None
     technique_hint: str | None = None
+
+
+class AgentStopRequest(BaseModel):
+    """Which agents to abort. Empty list or omitted means all running agents."""
+
+    org_ids: list[str] = Field(default_factory=list)

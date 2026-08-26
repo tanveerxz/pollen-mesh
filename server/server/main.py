@@ -13,6 +13,7 @@ from server import agent_runner, attacks, store
 from server.matching import process_new_signature
 from server.models import (
     AgentRunRequest,
+    AgentStopRequest,
     AttackLaunchRequest,
     CustomAttackRequest,
     LocalActionRequest,
@@ -138,6 +139,16 @@ def run_agents(payload: AgentRunRequest) -> dict[str, object]:
         except FileNotFoundError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
     return {"runs": started}
+
+
+@app.post("/api/agents/stop")
+def stop_agents(payload: AgentStopRequest) -> dict[str, object]:
+    """Abort running agents. Stops the run on the SuperLink, not just our stream."""
+    if payload.org_ids:
+        stopped = [o for o in payload.org_ids if agent_runner.stop(o) is not None]
+    else:
+        stopped = agent_runner.stop_all()
+    return {"stopped": stopped, "runs": agent_runner.snapshot()}
 
 
 @app.get("/api/agents")
