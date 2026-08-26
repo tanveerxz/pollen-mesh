@@ -6,3 +6,11 @@
 {"timestamp": "2026-08-26T09:31:00Z", "source_process": "teams.exe", "event_type": "network_connection", "detail": "outbound TCP 443 to teams.microsoft.com, routine"}
 {"timestamp": "2026-08-26T09:44:20Z", "source_process": "explorer.exe", "event_type": "file_access", "detail": "opened shared_drive/Q3_budget.xlsx"}
 {"timestamp": "2026-08-26T10:02:15Z", "source_process": "backup_agent.exe", "event_type": "network_connection", "detail": "outbound TCP 443 to backup-vendor.com, scheduled job"}
+{"timestamp": "2026-08-26T12:58:40Z", "source_process": "outlook.exe", "event_type": "file_access", "detail": "opened attachment Invoice_88421.docm from external sender"}
+{"timestamp": "2026-08-26T12:59:25Z", "source_process": "winword.exe", "event_type": "process_create", "detail": "spawned powershell.exe with -enc flag, unusual parent chain"}
+{"timestamp": "2026-08-26T12:59:50Z", "source_process": "powershell.exe", "event_type": "network_connection", "detail": "outbound TCP 443 to secure-update-delivery.net, parent=winword.exe, encoded command flag present"}
+{"timestamp": "2026-08-26T13:03:40Z", "source_process": "chrome.exe", "event_type": "network_connection", "detail": "outbound TCP 443 to news-site.com, browsing"}
+{"timestamp": "2026-08-26T13:03:42Z", "source_process": "outlook.exe", "event_type": "file_access", "detail": "opened attachment Invoice_88421.docm from external sender"}
+{"timestamp": "2026-08-26T13:04:27Z", "source_process": "winword.exe", "event_type": "process_create", "detail": "spawned powershell.exe with -enc flag, unusual parent chain"}
+{"timestamp": "2026-08-26T13:04:52Z", "source_process": "powershell.exe", "event_type": "network_connection", "detail": "outbound TCP 443 to secure-update-delivery.net, parent=winword.exe, encoded command flag present"}
+{"timestamp": "2026-08-26T13:08:42Z", "source_process": "chrome.exe", "event_type": "network_connection", "detail": "outbound TCP 443 to news-site.com, browsing"}

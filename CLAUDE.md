@@ -60,240 +60,29 @@ The `supergrid`/`flwr login` path above turned out not to be how Track 2 actuall
 4. Run all three orgs against a live `server/` (not just one in isolation) and confirm `GET /api/matches` shows a `pending` match with `org_ids: ["org_a", "org_b"]` — that's the actual thing being demoed, not any one org's console output.
 5. Free port 8000 if something else is squatting on it (happened on the original dev machine, may not apply to yours) — org configs and the client both default to it.
 
-**Step 2 — make it strong (this is the real work; roughly in priority order):**
+**Step 2 — RESOLVED on 2026-08-26. Read this before touching the agent.**
 
-1. **Standardize the `technique` field the model produces — this is the biggest real weakness found in live testing.** Independently running `org_a` and `org_b` against the identical underlying attack pattern produced two *different* technique strings: `office_child_process_with_encoded_powershell` from one, `T1059.001` from the other. §4.5 says the field should be "ideally a MITRE ATT&CK id," but nothing currently enforces that, and free-text labels will essentially never match across two independent model calls. Today's demo pair only correlated because they *also* shared an identical `indicator_hash` (§5.5 rule 1a — I already fixed a related bug in `server/matching.py` today so a match now extends on indicator-hash equality even when technique strings differ, not just on technique equality as originally written). But rule 1b — the technique + time-window fallback, for cases with *no* shared indicator — is currently close to useless if technique labels are this inconsistent, and the Correlator page's per-technique grouping/coloring will look incoherent with free-text labels. Fix at the source: tighten `EXTRACT_INSTRUCTIONS`/`EXTRACT_SCHEMA` in `agent.py` to require a real MITRE ATT&CK ID (pattern like `T\d{4}(\.\d{3})?`), and add a deterministic validation step next to the existing guard-rail check that rejects/retries a signature whose `technique` doesn't match that shape, instead of trusting the model's word for it — same philosophy as the existing IPv4/hostname guard-rail.
-2. **Retry transient model-call failures instead of dropping the row on the first error.** Right now one flaky network blip on the *one* row that makes the demo work silently drops it with no recovery. Add 1–2 retries with a short backoff around the `agent.responses.create()` calls in `_classify`/`_extract` before giving up on a row.
-3. **Write real automated tests for the deterministic pieces** — `_normalize_indicator`/`_hash_indicator` (confirm `http://X`, `https://X.`, ` X `, `X/` all hash identically — this is the entire reason cross-org matching works), `_has_identifying_content` (feed it an IPv4, a "corp"/"internal"/"hostname" token, and confirm it rejects), `_valid_timestamp`, and `_extract_structured_output` against a fixture of the *actual* Kimi response shape (reasoning item before message item — captured live today, see §0b) so a future model/prompt change can't silently regress this parsing again.
-4. **Better failure diagnostics.** The current `except requests.RequestException` print doesn't show the response body on a non-2xx from the server — add that, so a malformed payload (schema mismatch, bad confidence range) is diagnosable live instead of just showing a status code.
-5. **Sanity-clamp what the model hands back before trusting it** — `confidence` clamped to `[0.0, 1.0]`, and reject a signature whose `technique`/`indicator` come back as an empty string, the same system-boundary skepticism already applied to the redaction guard-rail.
-6. **Verify the "org C joins late" flourish end to end against the fixed server** — `orgs/org_c/data/mock_log_flourish_row.jsonl` has the exact row; append it to `mock_log.jsonl`, re-run `org_c`, confirm the *same* match's `org_ids` grows to three (this now works per the matching.py fix, but prove it live before relying on it in the actual demo).
-7. **Optional, only if 1–6 are solid and there's time:** try GLM-5.2/MiniMax-M3 (real keys in §0b's table) as a fallback only if Kimi's JSON-following gets flaky under repeated testing; or add a second, distinct attack pattern to the mock logs (beyond the one scripted campaign row) to make the technical-execution/impact story less obviously a single scripted demo path.
+The reliability problem described in earlier revisions of this file is **fixed**, and `orgs/*/agent.py` has been rewritten accordingly. Both agents now run live end to end and produce a real correlated match (`org_a` + `org_b`, `T1059.001`, hash `39b83e8cf8e2dd93`). What the fix was, so it isn't accidentally undone:
 
----
+1. **`reason` is generated BEFORE `escalate` in the triage schema.** This was the whole problem. With the boolean first, the model commits to an answer and then rationalises it — measured failures had `flag=false` alongside reasons that literally read *"ELEVATE: textbook malicious execution"* and *"Unexpected activity: PowerShell making an outbound…"*. The model was reasoning correctly and answering wrongly. Putting the prose first conditions the boolean on the analysis. **Do not reorder those schema properties.**
+2. **The model is never asked for the indicator.** Asking for an attacker domain to send to an external service reads as an exfiltration request and gets refused by safety filters (GLM: *"Refusing to extract the suspicious domain"*; MiniMax refused every time). `extract_indicator()` now pulls it deterministically with a regex plus a benign-domain allowlist. This is also strictly better engineering: two orgs seeing the same infrastructure are now *guaranteed* to produce the same hash, rather than hoping two model calls agree.
+3. Also in place: 3 retries per model call with backoff, 2-vote triage (escalate if either vote does), `T####[.###]` regex validation on the technique, and confidence clamped to [0,1].
 
-## 1. What this is, in one paragraph
+**Benchmarked before/after** (`scratchpad/bench2.py`, 5 runs × 3 models on the campaign row, checking both that the attack row escalates *and* that a benign row does not):
 
-Three isolated processes (`org_a`, `org_b`, `org_c`), each a real Flower `AgentApp`, each reading only its own mock security log and using an LLM to classify each line and, for anything suspicious, extract a stripped, anonymized "signature." The only thing each process ever sends anywhere is that signature, via one HTTP call to a FastAPI server. The server runs deterministic (non-LLM) matching logic across signatures from different orgs, holds any match above threshold in a pending state, and only advances it when a human approves on a Next.js dashboard screen that shows exactly what would be disclosed. Approved matches then wait on a second, per-org "local action" approval before being marked resolved.
+| | Kimi-K2.7-Code | GLM-5.2 | MiniMax-M3 |
+|---|---|---|---|
+| before | 2/4 | 2/4 | 0/4 |
+| after | **5/5** | **5/5** | **5/5** |
 
----
+All three also returned `T1059.001` every time, which resolves the inconsistent-technique-label concern as a side effect. Kimi remains the default because it needs no API key; GLM and MiniMax are now equally viable fallbacks with the keys in §0b.
 
-## 2. Repo layout
+**Still worth doing, in priority order:**
 
-```
-pollen/
-├── CLAUDE.md
-├── README.md                # public-facing description — "open-source" is a submission requirement
-├── client/                  # Next.js — frontend only, calls the server over HTTP, no API routes of its own
-├── server/                  # FastAPI — owns all state and the matching logic
-├── orgs/
-│   ├── org_a/                # its own Flower project: config + agent logic + its own mock log
-│   ├── org_b/                # identical shape
-│   └── org_c/                # identical shape
-└── shared/
-    └── signature.md          # the canonical signature shape, referenced by both org agents and the server
-```
-
-Each `orgs/org_x/` is its own installable Flower project with its own dependency environment, so the three processes are genuinely independent — no shared interpreter state between them.
-
-**Why FastAPI for the server:** same language as the org agents, so the payload an org agent builds and the payload the server expects can be the exact same shape with no translation layer to drift out of sync under time pressure.
-
-**Why `shared/signature.md` is a reference doc, not a shared code module:** Flower packages each org's AgentApp as its own bundle, scoped to that org's own directory — a cross-directory import from `shared/` is a packaging assumption that needs verifying against the live SDK (see §0) before relying on it. Default to each org agent constructing the signature independently to match the documented shape; only share the actual module if a live check confirms cross-directory includes work.
-
----
-
-## 3. Non-negotiable rules
-
-1. **Never fake the output.** Seeding synthetic input data so the pipeline has something real to find is fine (§7 — the campaign rows share a literal indicator on purpose). Hardcoding a match result, or making Approve do anything other than a real state change, is not.
-2. **The privacy boundary must be real.** Each org process reads only its own local log and makes exactly one kind of outbound call — the signature submission. No shortcut may give one org's process access to another's raw data.
-3. **The matching logic is deterministic, not an LLM call.** Reliability over "everything is an agent."
-4. **The installed Flower SDK overrules this document** wherever they conflict.
-
----
-
-## 4. Specification: the org agents (Flower)
-
-### 4.1 Responsibility
-
-Read one org's own mock log, decide which lines are worth escalating, extract an anonymized signature from each escalated line, and submit each signature to the server. Nothing else leaves the process.
-
-### 4.2 Project configuration requirements
-
-Each `orgs/org_x/` needs a Flower project configuration declaring:
-
-| Requirement | Value |
-|---|---|
-| Runtime dependency | the `flwr` package (a version compatible with whatever `uv run flwr --help` reports as installed) plus an HTTP client library for the one outbound call |
-| Declared run-config key `agent.org_id` | `"org_a"`, `"org_b"`, or `"org_c"` respectively |
-| Declared run-config key `agent.log_path` | path to that org's own mock log file, e.g. `data/mock_log.csv` |
-| Declared run-config key `agent.server_url` | `http://localhost:8000/api/signatures` |
-| Entry point | one function registered as the app's main entry point, receiving a model/connector session object and a context object carrying the run config above |
-| Packaging scope | only that org's own package directory and its own data file — never a path outside `orgs/org_x/` unless §0's cross-directory check passes |
-
-### 4.3 Runtime behavior, in order
-
-1. On start, read the org's own run-config values (`org_id`, `log_path`, `server_url`).
-2. Load every row of the local mock log file (see §7 for exact content — a small table of timestamped security-relevant events).
-3. For each row, in order:
-   a. **Classify.** Send the row to the model with instructions to decide whether it's ordinary background noise or worth escalating as possibly part of a broader, multi-organization attack pattern. The model must respond with exactly two fields: a boolean `flag`, and a one-sentence `reason`. If the row isn't flagged, move to the next row — nothing further happens for it.
-   b. **Extract.** For a flagged row, send it back to the model with instructions to produce a signature matching the schema in §4.5, under a hard rule: never include a company name, hostname, username, raw IP address, or raw domain name in any field. If the model cannot produce a compliant signature, it must respond with an explicit error field instead of guessing — that row is then dropped, not sent.
-   c. **Guard-rail check (deterministic, independent of what the model claims it did).** Before anything is sent, the produced signature must be checked for identifying content itself — reject and drop (do not send) any signature whose fields contain what looks like a raw IPv4 address (four dot-separated number groups), or an obvious internal-hostname-style token (words like "corp", "internal", "hostname" embedded in a field). This check exists specifically so a model mistake doesn't get sent just because the model said it redacted correctly.
-   d. **Hash the indicator.** The signature's `indicator` field, as produced by the model, must be hashed (a stable one-way hash, e.g. SHA-256, truncated to a fixed short length such as the first 16 hex characters) before it leaves the process. The model is instructed to hand back the raw representative token specifically so the *agent's own code*, not the model, controls the hashing — this keeps the hash deterministic and reproducible across orgs hit by the same indicator.
-   e. **Send.** Submit the resulting signature (with the `org_id` field attached — see the attribution note in §6) as one HTTP POST to `agent.server_url`, with a short timeout (a few seconds is enough; a demo shouldn't hang on a stalled request). Log the outcome (technique + response status) to the console so the live demo has visible proof of what happened.
-4. When every row has been processed, the run ends. There is no loop back to the top — one pass over the log per run.
-
-### 4.4 Exact prompts
-
-**Classify prompt** — sent once per log row:
-
-> You are a first-pass triage agent reviewing ONE log line from your own organization's security telemetry. You will never see another organization's data.
->
-> Log line (JSON): `{the row, serialized}`
->
-> Decide whether this line is ordinary background noise or worth escalating as possibly part of a broader, multi-organization attack pattern (for example: a living-off-the-land technique, unusual process ancestry, or beaconing-like outbound behavior).
->
-> Respond with ONLY a JSON object, no other text: `{"flag": true or false, "reason": "<one short sentence>"}`
-
-**Extract prompt** — sent only for a flagged row:
-
-> You are extracting a SHAREABLE signature from a flagged security log line, to be sent to an external cross-organization correlation service.
->
-> CRITICAL RULES:
-> - NEVER include a company name, hostname, username, raw IP address, or raw domain name in any field.
-> - The "indicator" field should be the representative suspicious token itself (e.g. a domain-like string) — do not hash it, the caller will.
-> - If you cannot produce a compliant signature without leaking identifying detail, respond with `{"error": "cannot redact safely"}` instead of the schema.
->
-> Log line (JSON): `{the row, serialized}`
->
-> Respond with ONLY a JSON object matching this schema, no other text: `{the schema from §4.5, as text}`
-
-### 4.5 Signature shape (what the model must produce, pre-hash)
-
-| Field | Type | Notes |
-|---|---|---|
-| `technique` | string | short label, ideally a MITRE ATT&CK id such as `T1059.001` |
-| `indicator` | string | representative suspicious token (e.g. a domain-like string); **not yet hashed** at this point — the agent's own code hashes it after the model responds |
-| `window_start` | string | ISO 8601 timestamp |
-| `window_end` | string | ISO 8601 timestamp |
-| `confidence` | number | 0.0–1.0 |
-
-What actually gets sent to the server additionally includes `org_id` (string) and has `indicator` replaced with its hashed form (renamed conceptually to "indicator_hash" on the wire — see §5.3 for the server-side field name).
-
-### 4.6 Run commands (one terminal per org)
-
-Superseded by §0b: no `supergrid`/`flwr login` — target the default local SuperLink, with the shared model endpoint's key/URL/`PYTHONIOENCODING` set in each shell first (see §0b for the full model table and why each var is needed):
-
-```
-export FLWR_MODEL_API_KEY="<anything non-empty for Kimi>"
-export FLWR_MODEL_API_ENDPOINT="http://134.199.193.245:8001/v1/responses"
-export PYTHONIOENCODING="utf-8"
-
-cd orgs/org_a && uv sync && uv run flwr run . --stream
-cd orgs/org_b && uv sync && uv run flwr run . --stream
-cd orgs/org_c && uv sync && uv run flwr run . --stream
-```
-
-If you change `FLWR_MODEL_API_KEY`/`FLWR_MODEL_API_ENDPOINT` between runs, kill the running `flower-superlink.exe` (and its `flower-superexec.exe` children) first — per §0b it's a persistent daemon that keeps the environment it first started with.
-
-Start `server/` first, then `client/`, so there's somewhere for the signature POSTs to land before any org process runs.
-
----
-
-## 5. Specification: the server (FastAPI)
-
-### 5.1 Responsibility
-
-Sole owner of all shared state (every signature received, every match record, every approval decision). Runs the matching logic. Exposes the HTTP contract both the org agents and the client depend on. Nothing here calls a model — everything in this component is deterministic.
-
-### 5.2 Tech requirement
-
-Python, FastAPI, an ASGI server (uvicorn) to run it, an in-memory store (a database is not needed for a single demo run — module-level state that resets when the process restarts is the expected behavior, not a bug). CORS must be configured to allow requests from the client's dev origin (`http://localhost:3000`).
-
-### 5.3 Data model
-
-**Signature record** (created on `POST /api/signatures`, immutable afterward):
-
-| Field | Type | Set by |
-|---|---|---|
-| `id` | string | server, on creation — any collision-resistant unique string |
-| `org_id` | string | caller (the org agent) |
-| `technique` | string | caller |
-| `indicator_hash` | string | caller (already hashed before it reached the server) |
-| `window_start` | string (ISO 8601) | caller |
-| `window_end` | string (ISO 8601) | caller |
-| `confidence` | number, 0–1 | caller |
-| `received_at` | string (ISO 8601) | server, on creation |
-
-**Match record** (created or extended by the matching logic, mutated by approval/local-action endpoints):
-
-| Field | Type | Notes |
-|---|---|---|
-| `id` | string | server-assigned on creation |
-| `signature_ids` | list of strings | every signature that contributed to this match |
-| `org_ids` | list of strings | every distinct org involved |
-| `technique` | string | the shared technique label |
-| `indicator_hash` | string or null | set if the match was found via identical indicator hashes; null if it was found via technique+time-window overlap instead |
-| `window_start` / `window_end` | string (ISO 8601) | **added during implementation, not in the original design pass** — the earliest `window_start` and latest `window_end` among all contributing signatures. §6.4's Approval screen requires showing "the time window" of a match, but the original Match record had nowhere to hold one; this closes that gap. Recomputed (min/max) whenever a match is extended in §5.5 step 5. |
-| `confidence` | number, 0–1 | the highest confidence among contributing signatures |
-| `status` | one of `pending`, `approved`, `rejected`, `resolved` | see §5.5 state machine |
-| `created_at` | string (ISO 8601) | set on creation |
-| `approved_at` | string (ISO 8601), optional | set only when approved |
-| `local_actions` | map of org_id → one of `pending`, `approved`, `rejected` | empty until the match is approved; one entry per org in `org_ids` once approved |
-
-### 5.4 Endpoint contracts
-
-**`POST /api/signatures`**
-Request body: `org_id`, `technique`, `indicator` (already hashed by the sender), `window_start`, `window_end`, `confidence` — all required; `confidence` must validate as a number between 0 and 1 inclusive, reject the request otherwise. On success: create the Signature record (server assigns `id` and `received_at`), append it to the store, then run it through the matching algorithm (§5.5) against every previously stored signature. Respond `201` with `{ "signature_id": <id>, "match_id": <id or null> }` — null if no match was created or extended by this submission.
-
-**`GET /api/signatures`**
-No body. Returns every stored Signature record, in the order received. Used by the Correlator screen to plot all known signatures.
-
-**`GET /api/matches`**
-Optional query parameter `status`. Returns every Match record, or only those with the given status if the parameter is present.
-
-**`GET /api/matches/{id}`**
-Returns the single Match record with that id, or a `404` if none exists.
-
-**`POST /api/matches/{id}/approve`**
-Only valid when the match's current status is `pending`; if it is not, respond `409` and make no change. On success: set `status` to `approved`, set `approved_at` to the current time, and populate `local_actions` with one entry per org in `org_ids`, each initialized to `pending`. Return the updated Match record.
-
-**`POST /api/matches/{id}/reject`**
-Only valid when the match's current status is `pending`; otherwise `409`, no change. On success: set `status` to `rejected`. This is terminal — a rejected match is never revisited by later logic.
-
-**`POST /api/matches/{id}/local-action/{org_id}`**
-Only valid when the match's current status is `approved` and `org_id` is one of the orgs in its `org_ids`; otherwise `404`/`409` as appropriate. Request body: a `decision` field, either `approved` or `rejected`. On success: set `local_actions[org_id]` to that decision. Afterward, check: if every entry in `local_actions` is now `approved`, set the match's overall `status` to `resolved`. A single org rejecting its local action does **not** revert the match's overall status — it stays `approved` with that one org's decision visibly recorded as `rejected`, since one org declining its own follow-up action has no bearing on whether the other orgs still choose to act on the same disclosed alert.
-
-**`GET /api/orgs/{org_id}/status`**
-Returns a small summary: `org_id`, `signature_count` (how many signatures that org has submitted), `pending_match_count` (how many currently-pending matches involve that org). Used by the Mission Control screen's status dots.
-
-**`GET /api/orgs/{org_id}/log`** *(optional convenience endpoint)*
-Returns the raw rows of that org's own mock log file, for the Org Node screen to display "what stayed local." Only needed if the client isn't reading the mock CSV files directly off the same filesystem — see §6.4.
-
-### 5.5 Matching algorithm — precise rule, described exactly
-
-Given a newly received signature **S**:
-
-1. Compare S against every previously stored signature from a *different* org. Call one such signature **T** a "partner" of S if either: (a) S and T have identical `indicator_hash` values — this is the strong case, since it means the same underlying attacker infrastructure was seen independently by two orgs — or (b) S and T share the same `technique` string *and* their time windows overlap once T's window is padded by a fixed tolerance (60 minutes) on both ends.
-2. Collect every partner of S found this way into a set.
-3. If the set of distinct `org_id`s among {S} plus its partners has fewer than 2 members, stop — no match, nothing is created or changed.
-4. Compute a confidence value as the maximum `confidence` among S and all its partners. If that value is below a threshold (0.5), stop — no match.
-5. Check whether a Match record already exists with status `pending`, the same `technique` as S, and whose existing `org_ids` (plus S's own `org_id`) would cover the same or a subset of the org set found in step 2. If so, **extend** it: add S's id to `signature_ids`, add S's `org_id` to `org_ids` if not already present, and raise the match's `confidence` to the higher of its current value and the one just computed. Return that match.
-6. Otherwise, **create** a new Match record: a fresh id, `signature_ids` containing S and every partner's id, `org_ids` containing every distinct org involved, the shared `technique`, `indicator_hash` set to S's hash if any partner shared that same hash (otherwise null), the computed `confidence`, `status` set to `pending`, `created_at` set to now, and `local_actions` left empty. Return the new match.
-
-This whole procedure runs once, synchronously, as part of handling `POST /api/signatures` — it is not a background job.
-
-### 5.6 State machine summary
-
-`pending` → (`approve`) → `approved` → (every org's local action becomes `approved`) → `resolved`
-`pending` → (`reject`) → `rejected` *(terminal)*
-
-No other transitions exist. A match is never automatically approved or automatically resolved except by the two rules above.
-
-### 5.7 Run command
-
-```
-cd server && uv sync && uv run uvicorn server.main:app --reload --port 8000
-```
+1. **Run it five times in a row and confirm every run submits `39b83e8cf8e2dd93`.** The benchmark says it should, but the agent path has more moving parts than the benchmark did. This is the acceptance bar before trusting it live.
+2. **Know the failure mode that isn't the model's fault:** one test run failed every row with `WinError 10051 — unreachable network`. The shared endpoints are plain HTTP on public IPs and venue wifi may block or drop them. If every row fails identically with a connection error, it's the network, not the code — check with `curl` against the endpoint before debugging anything else. Have a phone hotspot ready.
+3. **Automated tests for the deterministic pieces** — `_normalize_indicator`/`_hash_indicator` (confirm `http://X`, `X/`, ` X `, `X.` all hash identically — this is *why* cross-org matching works), `extract_indicator` (benign domains rejected, attacker domain found), `_leaks_identity`, and `_structured_output` against a captured Kimi response with its leading `reasoning` item.
+4. **Verify the "org C joins late" flourish** end to end (§7 / `mock_log_flourish_row.jsonl`), or use the attack console's supply-chain scenario, which hits all three orgs and exercises the same three-org path.
 
 ---
 
@@ -324,6 +113,19 @@ Poll the relevant server endpoint(s) on an interval of 1.5–2 seconds per page 
 **`/resolution`.** Lists every Match with status `approved` or `resolved`. For each, shows every org in `org_ids` with its current `local_actions` entry, and — for any org whose entry is still `pending` — a button that simulates that org's own analyst approving (or rejecting) its local follow-up action, calling `POST /api/matches/{id}/local-action/{org_id}`. Once every org's entry is `approved`, the match visibly reflects `resolved` status. Acceptance: a match can be walked from `approved` to `resolved` entirely from this screen.
 
 **`/architecture`.** A static page for judges: one short paragraph explaining the mechanism (local reasoning → deterministic correlation → human approval, twice), plus a simple diagram showing that same three-step flow, and an explicit statement that this is built on Flower Agent. No dynamic data on this page.
+
+### 6.4b Attack console (`/attacks`) — added 2026-08-26, not in the original design pass
+
+The original demo path depended on the §7 campaign rows already sitting in each log, which reads as pre-staged. The attack console replaces that with something live: pick a scenario, launch it, and **real rows are appended to the targeted orgs' own `data/mock_log.jsonl` files** by the server. From that moment the ordinary §4.3 pipeline applies unchanged — each org still has to find the attack in its own telemetry.
+
+Server side (`server/server/attacks.py`, endpoints `GET /api/attacks` and `POST /api/attacks/{id}/launch`):
+
+- **Four scenarios**, all verified end to end: `phishing_macro_c2` (org_a + org_b, shares the §7 indicator so it hashes to `39b83e8cf8e2dd93`), `supply_chain_update` (all three orgs), `cred_harvest_proxy` (org_b + org_c), and `isolated_ransomware_staging` (org_c only). The last one is deliberately a **negative control** — it must produce no match, which demonstrates the mesh doesn't invent correlations. Worth showing judges.
+- **Two launch modes.** `real` writes the rows and stops; you then run the Flower agents normally and they do the live model work — this is the honest end-to-end path and nothing shortcuts it. `demo` additionally runs `analyse_row`, a deterministic rule-based detector that stands in for the **LLM triage step only** so the demo takes seconds rather than minutes. It reads the real rows, derives the indicator from the row's own text, and hashes it with a function byte-identical to the agents'; correlation is the real §5.5 algorithm in both modes. Signatures created this way are returned in the launch response and badged `simulated` throughout the UI — they are never presented as agent output. This is §3 rule 1's "seeding synthetic input is fine" applied to one step, not a hardcoded result.
+- **Timestamps are launch-relative**, so the correlator timeline reflects when you actually ran it rather than a fixed 2026-08-26T09:xx window.
+- **Logs are mutated on disk, and rewound by `POST /api/demo/reset`.** The first time a log is appended to, the server snapshots it to `mock_log.baseline.jsonl` alongside it; reset restores every org from that baseline and clears all in-memory state. Baselines are gitignored. **Shritesh: this is why your log files may have extra rows during testing — hit reset (or the Reset button in the UI) to get back to the pristine §7 content.** Don't commit a mutated `mock_log.jsonl`.
+
+`POST /api/demo/reset` also exists purely for rehearsal (§10 step 1) and is outside §5.4's contract.
 
 ### 6.5 Visual language (apply consistently across every page above)
 

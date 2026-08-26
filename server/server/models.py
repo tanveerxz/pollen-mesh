@@ -61,3 +61,16 @@ class OrgStatus(BaseModel):
     org_id: str
     signature_count: int
     pending_match_count: int
+
+
+class AttackLaunchRequest(BaseModel):
+    """`real` writes log rows only; `demo` also runs the stand-in detector."""
+
+    mode: Literal["real", "demo"] = "real"
+
+
+class AgentRunRequest(BaseModel):
+    """Which org agents to launch, and optionally which model they should use."""
+
+    org_ids: list[str]
+    model: str | None = None

@@ -1,37 +1,383 @@
 @import "tailwindcss";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
+/* ============================================================
+   Pollen Mesh — design system
+   Semantic colours are fixed by CLAUDE.md §6.5:
+     green  = stays local / contained
+     amber  = held for a human decision
+     brick  = has crossed an org boundary
+   Everything else is neutral so those three always read loudest.
+   ============================================================ */
 
-  /* Pollen Mesh visual language — see CLAUDE.md §6.5 */
-  --pollen-green: #3f7a57;
-  --pollen-amber: #b5701a;
-  --pollen-brick: #9c4436;
+:root {
+  --canvas: #fbfbfd;
+  --surface: #ffffff;
+  --surface-2: #f5f5f8;
+  --sunken: #eeeef3;
+
+  --fg: #08090a;
+  --fg-muted: #62636b;
+  --fg-subtle: #9294a0;
+
+  --line: rgba(9, 9, 11, 0.09);
+  --line-strong: rgba(9, 9, 11, 0.18);
+
+  --local: #3f7a57;
+  --hold: #b5701a;
+  --crossed: #9c4436;
+
+  --local-wash: rgba(63, 122, 87, 0.09);
+  --hold-wash: rgba(181, 112, 26, 0.1);
+  --crossed-wash: rgba(156, 68, 54, 0.09);
+
+  --shadow-sm: 0 1px 2px rgba(9, 9, 11, 0.05);
+  --shadow-md: 0 4px 16px -4px rgba(9, 9, 11, 0.1), 0 1px 3px rgba(9, 9, 11, 0.05);
+  --shadow-lg: 0 24px 48px -16px rgba(9, 9, 11, 0.16);
+
+  --grid-line: rgba(9, 9, 11, 0.035);
+  --ease: cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --canvas: #08090a;
+    --surface: #0e1013;
+    --surface-2: #14171b;
+    --sunken: #050506;
+
+    --fg: #f4f4f6;
+    --fg-muted: #8e909c;
+    --fg-subtle: #5b5d69;
+
+    --line: rgba(255, 255, 255, 0.09);
+    --line-strong: rgba(255, 255, 255, 0.2);
+
+    --local: #6fae84;
+    --hold: #e0973a;
+    --crossed: #d08072;
+
+    --local-wash: rgba(111, 174, 132, 0.12);
+    --hold-wash: rgba(224, 151, 58, 0.13);
+    --crossed-wash: rgba(208, 128, 114, 0.12);
+
+    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+    --shadow-md: 0 4px 20px -4px rgba(0, 0, 0, 0.55);
+    --shadow-lg: 0 32px 64px -16px rgba(0, 0, 0, 0.7);
+
+    --grid-line: rgba(255, 255, 255, 0.032);
+  }
+}
+
+:root[data-theme="dark"] {
+  --canvas: #08090a;
+  --surface: #0e1013;
+  --surface-2: #14171b;
+  --sunken: #050506;
+
+  --fg: #f4f4f6;
+  --fg-muted: #8e909c;
+  --fg-subtle: #5b5d69;
+
+  --line: rgba(255, 255, 255, 0.09);
+  --line-strong: rgba(255, 255, 255, 0.2);
+
+  --local: #6fae84;
+  --hold: #e0973a;
+  --crossed: #d08072;
+
+  --local-wash: rgba(111, 174, 132, 0.12);
+  --hold-wash: rgba(224, 151, 58, 0.13);
+  --crossed-wash: rgba(208, 128, 114, 0.12);
+
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-md: 0 4px 20px -4px rgba(0, 0, 0, 0.55);
+  --shadow-lg: 0 32px 64px -16px rgba(0, 0, 0, 0.7);
+
+  --grid-line: rgba(255, 255, 255, 0.032);
 }
 
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --color-pollen-green: var(--pollen-green);
-  --color-pollen-amber: var(--pollen-amber);
-  --color-pollen-brick: var(--pollen-brick);
+  --color-canvas: var(--canvas);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-sunken: var(--sunken);
+  --color-fg: var(--fg);
+  --color-fg-muted: var(--fg-muted);
+  --color-fg-subtle: var(--fg-subtle);
+  --color-line: var(--line);
+  --color-line-strong: var(--line-strong);
+  --color-local: var(--local);
+  --color-hold: var(--hold);
+  --color-crossed: var(--crossed);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-    --pollen-green: #6fae84;
-    --pollen-amber: #e0973a;
-    --pollen-brick: #d08072;
-  }
+* {
+  border-color: var(--line);
+}
+
+html {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background: var(--canvas);
+  color: var(--fg);
+  font-family: var(--font-geist-sans), system-ui, sans-serif;
+  font-feature-settings: "cv11", "ss01";
+}
+
+/* Faint engineering grid — makes the canvas feel like an instrument, not a page */
+.grid-bg {
+  background-image:
+    linear-gradient(var(--grid-line) 1px, transparent 1px),
+    linear-gradient(90deg, var(--grid-line) 1px, transparent 1px);
+  background-size: 56px 56px;
+  background-position: center center;
+}
+
+::selection {
+  background: var(--fg);
+  color: var(--canvas);
+}
+
+:focus-visible {
+  outline: 2px solid var(--fg);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* ---------- primitives ---------- */
+
+.mono {
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-variant-ligatures: none;
+}
+
+.label {
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-size: 10px;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+  color: var(--fg-subtle);
+}
+
+.panel {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+}
+
+.panel-inset {
+  background: var(--sunken);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+}
+
+.hairline {
+  height: 1px;
+  background: var(--line);
+}
+
+/* ---------- state chips ---------- */
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 9px;
+  border-radius: 999px;
+  font-family: var(--font-geist-mono), monospace;
+  font-size: 10px;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  border: 1px solid transparent;
+  white-space: nowrap;
+}
+.chip-local {
+  color: var(--local);
+  background: var(--local-wash);
+  border-color: color-mix(in srgb, var(--local) 26%, transparent);
+}
+.chip-hold {
+  color: var(--hold);
+  background: var(--hold-wash);
+  border-color: color-mix(in srgb, var(--hold) 30%, transparent);
+}
+.chip-crossed {
+  color: var(--crossed);
+  background: var(--crossed-wash);
+  border-color: color-mix(in srgb, var(--crossed) 30%, transparent);
+}
+.chip-idle {
+  color: var(--fg-subtle);
+  background: var(--surface-2);
+  border-color: var(--line);
+}
+
+/* ---------- status dot with live halo ---------- */
+
+.dot {
+  position: relative;
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  flex: none;
+}
+.dot::after {
+  content: "";
+  position: absolute;
+  inset: -4px;
+  border-radius: 999px;
+  border: 1px solid currentColor;
+  opacity: 0;
+}
+.dot-live::after {
+  animation: halo 2.4s var(--ease) infinite;
+}
+@keyframes halo {
+  0% { opacity: 0.7; transform: scale(0.7); }
+  70% { opacity: 0; transform: scale(1.9); }
+  100% { opacity: 0; transform: scale(1.9); }
+}
+
+/* ---------- buttons ---------- */
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  height: 38px;
+  padding: 0 16px;
+  border-radius: 10px;
+  font-size: 13.5px;
+  font-weight: 500;
+  border: 1px solid var(--line-strong);
+  background: var(--surface);
+  color: var(--fg);
+  cursor: pointer;
+  transition: transform 0.16s var(--ease), background 0.16s var(--ease),
+    border-color 0.16s var(--ease), opacity 0.16s var(--ease);
+  white-space: nowrap;
+}
+.btn:hover:not(:disabled) {
+  background: var(--surface-2);
+  border-color: var(--fg-subtle);
+}
+.btn:active:not(:disabled) { transform: scale(0.975); }
+.btn:disabled { opacity: 0.45; cursor: not-allowed; }
+
+.btn-primary {
+  background: var(--fg);
+  color: var(--canvas);
+  border-color: var(--fg);
+}
+.btn-primary:hover:not(:disabled) {
+  background: var(--fg);
+  border-color: var(--fg);
+  opacity: 0.88;
+}
+
+.btn-crossed {
+  background: var(--crossed);
+  border-color: var(--crossed);
+  color: #fff;
+}
+.btn-crossed:hover:not(:disabled) { opacity: 0.9; background: var(--crossed); }
+
+.btn-local {
+  background: var(--local);
+  border-color: var(--local);
+  color: #fff;
+}
+.btn-local:hover:not(:disabled) { opacity: 0.9; background: var(--local); }
+
+.btn-sm { height: 30px; padding: 0 11px; font-size: 12px; border-radius: 8px; }
+
+/* ---------- entrance motion ---------- */
+
+@keyframes rise {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: none; }
+}
+.rise { animation: rise 0.5s var(--ease) both; }
+
+@keyframes fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+.fade { animation: fade 0.4s var(--ease) both; }
+
+/* ---------- mesh topology ---------- */
+
+.wire {
+  fill: none;
+  stroke: var(--line-strong);
+  stroke-width: 1.25;
+  stroke-dasharray: 4 6;
+  animation: march 1.6s linear infinite;
+}
+@keyframes march {
+  to { stroke-dashoffset: -20; }
+}
+.wire-hot { stroke: var(--crossed); stroke-width: 1.75; opacity: 0.85; }
+
+/* a signature travelling org -> correlator, fired on real arrivals */
+.packet {
+  offset-rotate: 0deg;
+  animation: travel 1.15s cubic-bezier(0.4, 0, 0.5, 1) forwards;
+}
+@keyframes travel {
+  from { offset-distance: 0%; opacity: 0; }
+  12% { opacity: 1; }
+  85% { opacity: 1; }
+  to { offset-distance: 100%; opacity: 0; }
+}
+
+.pulse-node { animation: pulseNode 2.8s var(--ease) infinite; transform-origin: center; }
+@keyframes pulseNode {
+  0%, 100% { opacity: 0.32; transform: scale(1); }
+  50% { opacity: 0.06; transform: scale(1.22); }
+}
+
+/* ---------- event stream ---------- */
+
+.stream-row {
+  animation: streamIn 0.45s var(--ease) both;
+}
+@keyframes streamIn {
+  from { opacity: 0; transform: translateX(-6px); }
+  to { opacity: 1; transform: none; }
+}
+
+/* ---------- scrollbars ---------- */
+
+.scroll-thin::-webkit-scrollbar { width: 8px; height: 8px; }
+.scroll-thin::-webkit-scrollbar-track { background: transparent; }
+.scroll-thin::-webkit-scrollbar-thumb {
+  background: var(--line-strong);
+  border-radius: 999px;
+}
+.scroll-thin::-webkit-scrollbar-thumb:hover { background: var(--fg-subtle); }
+
+/* ---------- misc ---------- */
+
+.tabular { font-variant-numeric: tabular-nums; }
+
+.glass {
+  background: color-mix(in srgb, var(--canvas) 72%, transparent);
+  backdrop-filter: saturate(180%) blur(16px);
+  -webkit-backdrop-filter: saturate(180%) blur(16px);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }

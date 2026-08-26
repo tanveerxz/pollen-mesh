@@ -40,3 +40,10 @@ Thumbs.db
 *.pem
 .vercel
 coverage/
+
+# Attack-scenario log baselines (generated at runtime by the server)
+*.baseline.jsonl
+
+# Claude Code local config and secrets — never commit
+# (this repo gets published publicly for the submission)
+.claude/

@@ -1,8 +1,11 @@
-"""org_a's Flower AgentApp — see CLAUDE.md §4.
+"""Pollen Mesh org agent — see CLAUDE.md §4.
 
-Reads only this org's own mock log, classifies each row, extracts an
-anonymized signature for anything flagged, and POSTs that signature (never
-raw log content) to the correlation server. One pass per run.
+Reads only this org's own mock log, triages each row with a live model, and for
+anything worth escalating submits a stripped, hashed signature to the
+correlation server. One pass per run. Nothing else leaves the process.
+
+The org id, log path and server URL all come from run config, so this file is
+identical across org_a / org_b / org_c.
 """
 
 from __future__ import annotations
@@ -11,7 +14,7 @@ import hashlib
 import json
 import re
 import sys
-from datetime import datetime, timezone
+import time
 from pathlib import Path
 from typing import Any
 
@@ -19,178 +22,189 @@ import requests
 from flwr.agentapp import AgentApp, AgentSession
 from flwr.app import Context
 
-# Model output (e.g. em dashes, arrows) can contain characters the Windows
-# console's legacy codepage can't encode; without this, printing it crashes
-# the whole run rather than just losing a glyph.
+app = AgentApp()
+
+# Model output can contain characters the Windows console codepage can't encode;
+# without this a stray arrow or em dash kills the whole run (see CLAUDE.md §0b).
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
-app = AgentApp()
-
-CONFIDENCE_THRESHOLD_DEFAULT = 0.5
 REQUEST_TIMEOUT_SECONDS = 5.0
+MODEL_ATTEMPTS = 3           # transient failures are common; retry before giving up
+TRIAGE_VOTES = 2             # escalate if ANY vote says so — recall beats precision here
 
 _IPV4_RE = re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b")
 _INTERNAL_TOKEN_RE = re.compile(r"\b(corp|internal|hostname)\b", re.IGNORECASE)
+_TECHNIQUE_RE = re.compile(r"^T\d{4}(?:\.\d{3})?$")
+_DOMAIN_RE = re.compile(
+    r"\b((?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,})\b", re.IGNORECASE
+)
 
-CLASSIFY_SCHEMA: dict[str, Any] = {
+# Ordinary corporate destinations. Never a shareable indicator, so the agent has
+# to actually discriminate rather than hash the first domain it sees.
+BENIGN_DOMAINS = {
+    "windowsupdate.microsoft.com", "teams.microsoft.com", "slack.com",
+    "outlook.office365.com", "cdn-assets-fastly.net", "news-aggregator.com",
+    "news-site.com", "backup-vendor.com", "github.com",
+    "login.microsoftonline.com", "microsoft.com", "office.com",
+}
+
+# --- triage -----------------------------------------------------------------
+# `reason` is generated BEFORE `escalate` on purpose: with the boolean first the
+# model commits to an answer and then rationalises it, which measured ~50% recall
+# on the campaign row. Reasoning first took that to 15/15 across all three shared
+# models (benchmarked 2026-08-26). Do not reorder these properties.
+TRIAGE_SCHEMA: dict[str, Any] = {
     "type": "object",
-    "properties": {
-        "flag": {"type": "boolean"},
-        "reason": {"type": "string"},
-    },
-    "required": ["flag", "reason"],
+    "properties": {"reason": {"type": "string"}, "escalate": {"type": "boolean"}},
+    "required": ["reason", "escalate"],
     "additionalProperties": False,
 }
 
-CLASSIFY_INSTRUCTIONS = (
+TRIAGE_INSTRUCTIONS = (
     "You are a first-pass triage agent reviewing ONE log line from your own "
     "organization's security telemetry. You will never see another "
-    "organization's data. Decide whether this line is ordinary background "
-    "noise or worth escalating as possibly part of a broader, "
-    "multi-organization attack pattern (for example: a living-off-the-land "
-    "technique, unusual process ancestry, or beaconing-like outbound "
-    "behavior)."
+    "organization's data.\n\n"
+    "Write your analysis in 'reason' FIRST, then set 'escalate' to match that "
+    "analysis.\n"
+    "Escalate when the line shows a living-off-the-land technique, anomalous "
+    "process ancestry (an Office application spawning a shell), encoded or "
+    "obfuscated command lines, credential-harvesting behaviour, destructive "
+    "staging, or beaconing-like outbound traffic to non-corporate "
+    "infrastructure.\n"
+    "Do NOT escalate routine vendor traffic (Windows Update, Teams, Slack, "
+    "CDNs) or ordinary user file access.\n"
+    "If your reason describes the activity as suspicious, malicious, anomalous, "
+    "or says to escalate, then 'escalate' MUST be true."
 )
 
-# All fields required-but-nullable, per OpenAI-style strict structured output:
-# a single flat schema (no oneOf) that still lets the model signal failure by
-# nulling every signature field and filling `error` instead.
-EXTRACT_SCHEMA: dict[str, Any] = {
+# --- technique --------------------------------------------------------------
+# The model is NOT asked for the indicator. Requesting an attacker domain reads
+# as an exfiltration request and gets refused by safety filters on some models;
+# the agent extracts it deterministically below instead, which is both
+# unrefusable and reproducible across orgs.
+TECHNIQUE_SCHEMA: dict[str, Any] = {
     "type": "object",
     "properties": {
-        "error": {"type": ["string", "null"]},
-        "technique": {"type": ["string", "null"]},
-        "indicator": {"type": ["string", "null"]},
-        "window_start": {"type": ["string", "null"]},
-        "window_end": {"type": ["string", "null"]},
-        "confidence": {"type": ["number", "null"]},
+        "rationale": {"type": "string"},
+        "technique": {"type": "string"},
+        "confidence": {"type": "number"},
     },
-    "required": [
-        "error",
-        "technique",
-        "indicator",
-        "window_start",
-        "window_end",
-        "confidence",
-    ],
+    "required": ["rationale", "technique", "confidence"],
     "additionalProperties": False,
 }
 
-EXTRACT_INSTRUCTIONS = (
-    "You are extracting a SHAREABLE signature from a flagged security log "
-    "line, to be sent to an external cross-organization correlation "
-    "service.\n\n"
-    "CRITICAL RULES:\n"
-    "- NEVER include a company name, hostname, username, or raw IP address "
-    "in any field.\n"
-    "- NEVER include a raw domain name that identifies YOUR OWN "
-    "organization or its internal infrastructure.\n"
-    "- EXCEPTION: the 'indicator' field is allowed to contain the raw "
-    "external attacker-controlled token (e.g. a malicious domain-like "
-    "string) — that is external infrastructure, not information about your "
-    "own organization, and the caller will hash it before it ever leaves "
-    "this process.\n"
-    "- If you cannot produce a compliant signature without leaking "
-    "identifying detail about your OWN organization, set 'error' to a short "
-    "reason and leave every other field null."
+TECHNIQUE_INSTRUCTIONS = (
+    "Classify this already-triaged suspicious security event with a MITRE "
+    "ATT&CK technique id.\n"
+    "Reply with the id in 'technique' (format T#### or T####.###), a one-line "
+    "'rationale', and a 'confidence' between 0 and 1.\n"
+    "Do not include any hostname, username, IP address, or organization name."
 )
 
 
-def _extract_structured_output(response: dict[str, Any]) -> dict[str, Any]:
+def _structured_output(response: dict[str, Any]) -> dict[str, Any]:
     """Pull the JSON payload out of an Open-Responses-shaped model response."""
-    output_text = response.get("output_text")
-    if isinstance(output_text, str) and output_text.strip():
-        return json.loads(output_text)
+    text = response.get("output_text")
+    if isinstance(text, str) and text.strip():
+        return json.loads(text)
 
     for item in response.get("output", []) or []:
+        # Reasoning-tuned models emit a 'reasoning' item before the answer; only
+        # the 'message' item carries the schema-constrained JSON.
         if not isinstance(item, dict) or item.get("type") != "message":
-            continue  # skip reasoning/other non-answer items (e.g. Kimi's reasoning trace)
+            continue
         for part in item.get("content", []) or []:
             if isinstance(part, dict) and isinstance(part.get("text"), str):
                 return json.loads(part["text"])
 
-    raise ValueError(f"No structured output found in model response: {response!r}")
+    error = response.get("error")
+    if error:
+        raise ValueError(f"model error: {error}")
+    raise ValueError("no structured output in model response")
 
 
-def _classify(agent: AgentSession, model: str, row: dict[str, str]) -> tuple[bool, str]:
-    response = agent.responses.create(
-        {
-            "model": model,
-            "instructions": CLASSIFY_INSTRUCTIONS,
-            "input": f"Log line (JSON): {json.dumps(row)}",
-            "text": {
-                "format": {
-                    "type": "json_schema",
-                    "name": "classification",
-                    "schema": CLASSIFY_SCHEMA,
-                    "strict": True,
+def _ask(
+    agent: AgentSession,
+    model: str,
+    instructions: str,
+    schema: dict[str, Any],
+    name: str,
+    row: dict[str, str],
+) -> dict[str, Any]:
+    """One schema-constrained model call, retried on transient failure."""
+    last: Exception | None = None
+    for attempt in range(MODEL_ATTEMPTS):
+        try:
+            response = agent.responses.create(
+                {
+                    "model": model,
+                    "instructions": instructions,
+                    "input": f"Log line (JSON): {json.dumps(row)}",
+                    "text": {
+                        "format": {
+                            "type": "json_schema",
+                            "name": name,
+                            "schema": schema,
+                            "strict": True,
+                        }
+                    },
                 }
-            },
-        }
-    )
-    payload = _extract_structured_output(response)
-    return bool(payload["flag"]), str(payload["reason"])
+            )
+            return _structured_output(response)
+        except Exception as exc:  # noqa: BLE001 - retry any transport/parse failure
+            last = exc
+            if attempt < MODEL_ATTEMPTS - 1:
+                time.sleep(1.0 * (attempt + 1))
+    raise RuntimeError(f"model call failed after {MODEL_ATTEMPTS} attempts: {last}")
 
 
-def _extract(agent: AgentSession, model: str, row: dict[str, str]) -> dict[str, Any] | None:
-    response = agent.responses.create(
-        {
-            "model": model,
-            "instructions": EXTRACT_INSTRUCTIONS,
-            "input": f"Log line (JSON): {json.dumps(row)}",
-            "text": {
-                "format": {
-                    "type": "json_schema",
-                    "name": "signature_extraction",
-                    "schema": EXTRACT_SCHEMA,
-                    "strict": True,
-                }
-            },
-        }
-    )
-    payload = _extract_structured_output(response)
-    if payload.get("error"):
-        return None
-    required = ("technique", "indicator", "window_start", "window_end", "confidence")
-    if any(payload.get(field) is None for field in required):
-        return None
-    return payload
+def _triage(agent: AgentSession, model: str, row: dict[str, str]) -> tuple[bool, str]:
+    """Escalate if ANY vote escalates: a missed campaign row is far more costly
+    than one extra signature, which correlation would simply never match."""
+    reason = ""
+    for _ in range(TRIAGE_VOTES):
+        verdict = _ask(
+            agent, model, TRIAGE_INSTRUCTIONS, TRIAGE_SCHEMA, "triage", row
+        )
+        reason = str(verdict.get("reason", ""))
+        if bool(verdict.get("escalate")):
+            return True, reason
+    return False, reason
 
 
-def _has_identifying_content(signature: dict[str, Any]) -> bool:
-    """Deterministic guard-rail — see CLAUDE.md §4.3c. Never trust the model's word."""
-    for field in ("technique", "window_start", "window_end"):
-        value = signature.get(field)
-        if not isinstance(value, str):
+def extract_indicator(row: dict[str, str]) -> str | None:
+    """Deterministically pull the external attacker token out of the row.
+
+    Done in code rather than by the model so it is reproducible across orgs —
+    two orgs seeing the same infrastructure must produce the same hash — and so
+    no safety filter can refuse it.
+    """
+    detail = row.get("detail") or ""
+    for match in _DOMAIN_RE.finditer(detail):
+        candidate = match.group(1).lower().rstrip(".")
+        if candidate in BENIGN_DOMAINS or candidate.endswith(".exe"):
             continue
-        if _IPV4_RE.search(value) or _INTERNAL_TOKEN_RE.search(value):
-            return True
-    return False
+        return candidate
+    return None
 
 
 def _normalize_indicator(raw: str) -> str:
-    """Strip scheme/whitespace/trailing punctuation so identical infra hashes
-    identically across orgs, regardless of minor formatting differences."""
     value = raw.strip().lower()
     value = re.sub(r"^[a-z]+://", "", value)
-    value = value.rstrip("/.")
-    return value
+    return value.rstrip("/.")
 
 
 def _hash_indicator(raw: str) -> str:
-    normalized = _normalize_indicator(raw)
-    return hashlib.sha256(normalized.encode("utf-8")).hexdigest()[:16]
+    return hashlib.sha256(_normalize_indicator(raw).encode("utf-8")).hexdigest()[:16]
 
 
-def _valid_timestamp(value: Any) -> bool:
-    if not isinstance(value, str):
-        return False
-    try:
-        datetime.fromisoformat(value.replace("Z", "+00:00"))
-        return True
-    except ValueError:
-        return False
+def _leaks_identity(*values: str) -> bool:
+    """Deterministic guard-rail (§4.3c) — independent of what the model claims."""
+    for value in values:
+        if _IPV4_RE.search(value) or _INTERNAL_TOKEN_RE.search(value):
+            return True
+    return False
 
 
 @app.main()
@@ -198,7 +212,7 @@ def main(agent: AgentSession, context: Context) -> None:
     org_id = str(context.run_config["agent.org_id"])
     log_path = Path(str(context.run_config["agent.log_path"]))
     server_url = str(context.run_config["agent.server_url"])
-    model = str(context.run_config.get("agent.model", "Kimi-K2.7-Code"))
+    model = str(context.run_config.get("agent.model", "/models/Kimi-K2.7-Code"))
 
     if not log_path.is_absolute():
         log_path = Path(__file__).resolve().parent.parent / log_path
@@ -206,56 +220,71 @@ def main(agent: AgentSession, context: Context) -> None:
     with log_path.open(encoding="utf-8") as f:
         rows = [json.loads(line) for line in f if line.strip()]
 
-    print(f"[{org_id}] loaded {len(rows)} log rows from {log_path}")
+    print(f"[{org_id}] {len(rows)} rows from {log_path.name} | model={model}")
+    sent = 0
 
     for i, row in enumerate(rows):
         try:
-            flag, reason = _classify(agent, model, row)
-        except Exception as exc:  # model/network failure — skip this row, keep going
-            print(f"[{org_id}] row {i}: classify failed ({exc}); skipping")
+            escalate, reason = _triage(agent, model, row)
+        except Exception as exc:  # noqa: BLE001
+            print(f"[{org_id}] row {i}: triage failed ({exc}) — skipping")
             continue
 
-        print(f"[{org_id}] row {i}: flag={flag} reason={reason!r}")
-        if not flag:
+        if not escalate:
+            print(f"[{org_id}] row {i}: noise — {reason[:90]}")
+            continue
+
+        print(f"[{org_id}] row {i}: ESCALATE — {reason[:90]}")
+
+        indicator = extract_indicator(row)
+        if indicator is None:
+            print(f"[{org_id}] row {i}: no external indicator to share — dropped")
             continue
 
         try:
-            signature = _extract(agent, model, row)
-        except Exception as exc:
-            print(f"[{org_id}] row {i}: extract failed ({exc}); dropping row")
+            verdict = _ask(
+                agent, model, TECHNIQUE_INSTRUCTIONS, TECHNIQUE_SCHEMA,
+                "technique", row,
+            )
+        except Exception as exc:  # noqa: BLE001
+            print(f"[{org_id}] row {i}: technique call failed ({exc}) — dropped")
             continue
 
-        if signature is None:
-            print(f"[{org_id}] row {i}: model could not redact safely; dropping row")
+        technique = str(verdict.get("technique", "")).strip().upper()
+        if not _TECHNIQUE_RE.match(technique):
+            print(f"[{org_id}] row {i}: bad technique {technique!r} — dropped")
             continue
 
-        if _has_identifying_content(signature):
-            print(f"[{org_id}] row {i}: guard-rail rejected signature; dropping row")
+        try:
+            confidence = float(verdict.get("confidence", 0.0))
+        except (TypeError, ValueError):
+            confidence = 0.0
+        confidence = min(max(confidence, 0.0), 1.0)
+
+        if _leaks_identity(technique):
+            print(f"[{org_id}] row {i}: guard-rail rejected signature — dropped")
             continue
 
-        window_start = signature["window_start"]
-        window_end = signature["window_end"]
-        if not _valid_timestamp(window_start) or not _valid_timestamp(window_end):
-            window_start = window_end = row["timestamp"]
-
-        indicator_hash = _hash_indicator(str(signature["indicator"]))
-
-        outgoing = {
+        indicator_hash = _hash_indicator(indicator)
+        payload = {
             "org_id": org_id,
-            "technique": signature["technique"],
+            "technique": technique,
             "indicator": indicator_hash,
-            "window_start": window_start,
-            "window_end": window_end,
-            "confidence": float(signature["confidence"]),
+            "window_start": row["timestamp"],
+            "window_end": row["timestamp"],
+            "confidence": confidence,
         }
 
         try:
-            resp = requests.post(server_url, json=outgoing, timeout=REQUEST_TIMEOUT_SECONDS)
+            res = requests.post(
+                server_url, json=payload, timeout=REQUEST_TIMEOUT_SECONDS
+            )
+            sent += 1
             print(
-                f"[{org_id}] row {i}: sent technique={outgoing['technique']} "
-                f"indicator_hash={indicator_hash} -> HTTP {resp.status_code}"
+                f"[{org_id}] row {i}: SENT {technique} hash={indicator_hash} "
+                f"conf={confidence:.2f} -> HTTP {res.status_code}"
             )
         except requests.RequestException as exc:
             print(f"[{org_id}] row {i}: submission failed ({exc})")
 
-    print(f"[{org_id}] run complete — {len(rows)} rows processed")
+    print(f"[{org_id}] done — {sent} signature(s) released from {len(rows)} rows")

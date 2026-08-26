@@ -1,77 +1,152 @@
 "use client";
 
 import { useState } from "react";
-import { getMatches, postLocalAction, type MatchRecord } from "@/lib/api";
-import { usePolling } from "@/lib/usePolling";
+import Link from "next/link";
+import { orgLabel, postLocalAction, type MatchRecord } from "@/lib/api";
+import { useSystem } from "@/lib/system-context";
+
+export default function ResolutionPage() {
+  const { openMatches, link } = useSystem();
+
+  return (
+    <div className="mx-auto w-full max-w-[900px] flex-1 px-6 py-10">
+      <header className="rise">
+        <h1 className="text-[clamp(1.6rem,3vw,2.2rem)] font-semibold tracking-[-0.02em]">
+          Resolution
+        </h1>
+        <p className="mt-1.5 max-w-[64ch] text-[14px] leading-relaxed text-fg-muted">
+          Approving a disclosure is not the same as approving an action. Each
+          organisation decides independently whether to act on what it just learned —
+          and one declining has no bearing on the others.
+        </p>
+      </header>
+
+      {openMatches.length === 0 ? (
+        <div className="panel mt-6 px-6 py-16 text-center">
+          <p className="text-[14px] text-fg-muted">
+            {link === "offline" ? "Cannot reach the server." : "No approved disclosures yet."}
+          </p>
+          <p className="mt-1 text-[12.5px] text-fg-subtle">
+            A match has to clear the human approval gate before it appears here.
+          </p>
+          <Link href="/" className="btn btn-sm mt-4">
+            Back to Mission Control
+          </Link>
+        </div>
+      ) : (
+        <div className="mt-6 flex flex-col gap-3">
+          {openMatches.map((m) => (
+            <MatchCard key={m.id} match={m} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
 
 function MatchCard({ match }: { match: MatchRecord }) {
-  const [busyOrg, setBusyOrg] = useState<string | null>(null);
+  const { refresh } = useSystem();
+  const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const handleAction = async (orgId: string, decision: "approved" | "rejected") => {
-    setBusyOrg(orgId);
+  const act = async (orgId: string, decision: "approved" | "rejected") => {
+    setBusy(orgId);
     setError(null);
     try {
       await postLocalAction(match.id, orgId, decision);
+      refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
-      setBusyOrg(null);
+      setBusy(null);
     }
   };
 
-  const statusClass =
-    match.status === "resolved"
-      ? "text-pollen-green"
-      : "text-pollen-brick";
+  const decided = Object.values(match.local_actions).filter((v) => v !== "pending").length;
+  const approved = Object.values(match.local_actions).filter((v) => v === "approved").length;
+  const total = match.org_ids.length;
+  const resolved = match.status === "resolved";
 
   return (
-    <div className="rounded-lg border border-zinc-200 p-5 dark:border-zinc-800">
-      <div className="flex items-center justify-between">
-        <div>
-          <h3 className="font-semibold">{match.technique}</h3>
-          <p className="text-xs text-zinc-500 dark:text-zinc-400">
-            {match.org_ids.join(", ")}
-          </p>
-        </div>
-        <span className={`text-sm font-medium ${statusClass}`}>{match.status}</span>
+    <article
+      className="panel overflow-hidden rise"
+      style={{
+        borderColor: resolved
+          ? "color-mix(in srgb, var(--local) 45%, transparent)"
+          : "color-mix(in srgb, var(--crossed) 35%, transparent)",
+      }}
+    >
+      <div className="flex flex-wrap items-center gap-3 border-b border-line px-5 py-3.5">
+        <span className={`chip ${resolved ? "chip-local" : "chip-crossed"}`}>
+          {match.status}
+        </span>
+        <span className="mono text-[13.5px] font-medium">{match.technique}</span>
+        {match.indicator_hash && (
+          <span className="mono text-[11.5px] text-fg-subtle">{match.indicator_hash}</span>
+        )}
+        <span className="tabular ml-auto text-[12px] text-fg-subtle">
+          {approved}/{total} acted
+        </span>
       </div>
 
-      <ul className="mt-4 flex flex-col gap-2">
+      {/* progress */}
+      <div className="flex gap-1 px-5 pt-4">
+        {match.org_ids.map((orgId) => {
+          const d = match.local_actions[orgId] ?? "pending";
+          return (
+            <span
+              key={orgId}
+              className="h-1 flex-1 rounded-full transition-all duration-500"
+              style={{
+                background:
+                  d === "approved"
+                    ? "var(--local)"
+                    : d === "rejected"
+                      ? "var(--crossed)"
+                      : "var(--line-strong)",
+              }}
+            />
+          );
+        })}
+      </div>
+
+      <ul className="flex flex-col gap-2 p-5 pt-4">
         {match.org_ids.map((orgId) => {
           const decision = match.local_actions[orgId] ?? "pending";
+          const isBusy = busy === orgId;
+
           return (
             <li
               key={orgId}
-              className="flex items-center justify-between rounded border border-zinc-200 px-3 py-2 text-sm dark:border-zinc-800"
+              className="panel-inset flex flex-wrap items-center gap-3 px-4 py-3"
             >
-              <span>{orgId}</span>
+              <div className="min-w-0">
+                <p className="truncate text-[13.5px] font-medium">{orgLabel(orgId)}</p>
+                <p className="label">{orgId}</p>
+              </div>
+
               {decision === "pending" ? (
-                <div className="flex gap-2">
+                <div className="ml-auto flex gap-2">
                   <button
-                    type="button"
-                    disabled={busyOrg === orgId}
-                    onClick={() => handleAction(orgId, "approved")}
-                    className="rounded bg-pollen-green px-2 py-1 text-xs font-medium text-white disabled:opacity-50"
+                    className="btn btn-sm btn-local"
+                    disabled={isBusy}
+                    onClick={() => void act(orgId, "approved")}
                   >
-                    Approve local action
+                    {isBusy ? "…" : "Approve local action"}
                   </button>
                   <button
-                    type="button"
-                    disabled={busyOrg === orgId}
-                    onClick={() => handleAction(orgId, "rejected")}
-                    className="rounded border border-zinc-300 px-2 py-1 text-xs dark:border-zinc-700 disabled:opacity-50"
+                    className="btn btn-sm"
+                    disabled={isBusy}
+                    onClick={() => void act(orgId, "rejected")}
                   >
-                    Reject
+                    Decline
                   </button>
                 </div>
               ) : (
                 <span
-                  className={
-                    decision === "approved" ? "text-pollen-green" : "text-pollen-brick"
-                  }
+                  className={`chip ml-auto ${decision === "approved" ? "chip-local" : "chip-crossed"}`}
                 >
-                  {decision}
+                  {decision === "approved" ? "acting locally" : "declined"}
                 </span>
               )}
             </li>
@@ -79,43 +154,35 @@ function MatchCard({ match }: { match: MatchRecord }) {
         })}
       </ul>
 
-      {error && <p className="mt-2 text-xs text-pollen-brick">{error}</p>}
-    </div>
-  );
-}
+      {resolved && (
+        <div
+          className="flex items-center gap-2.5 border-t px-5 py-3.5 fade"
+          style={{
+            background: "var(--local-wash)",
+            borderColor: "color-mix(in srgb, var(--local) 30%, transparent)",
+          }}
+        >
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--local)" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M20 6 9 17l-5-5" />
+          </svg>
+          <p className="text-[13px]" style={{ color: "var(--local)" }}>
+            Every organisation approved its own action. Resolved.
+          </p>
+        </div>
+      )}
 
-export default function ResolutionPage() {
-  const { data: matches, error } = usePolling(
-    () =>
-      getMatches().then((all) =>
-        all.filter((m) => m.status === "approved" || m.status === "resolved"),
-      ),
-    1800,
-  );
-
-  return (
-    <div className="mx-auto flex w-full max-w-3xl flex-1 flex-col gap-6 px-6 py-10">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Resolution</h1>
-        <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
-          Each org decides its own follow-up action independently. One org rejecting
-          doesn&apos;t undo another org&apos;s approval.
-        </p>
-      </div>
-
-      {error && <p className="text-sm text-pollen-brick">{error}</p>}
-
-      {matches && matches.length === 0 && (
-        <p className="text-sm text-zinc-500">
-          No approved matches yet — approve one from the Approval screen first.
+      {decided > 0 && !resolved && (
+        <p className="border-t border-line px-5 py-3 text-[12px] text-fg-subtle">
+          One org declining does not revert the disclosure — the others still act on what
+          they learned.
         </p>
       )}
 
-      <div className="flex flex-col gap-4">
-        {matches?.map((match) => (
-          <MatchCard key={match.id} match={match} />
-        ))}
-      </div>
-    </div>
+      {error && (
+        <p className="px-5 pb-3 text-[12.5px]" style={{ color: "var(--crossed)" }}>
+          {error}
+        </p>
+      )}
+    </article>
   );
 }
