@@ -1,0 +1,6 @@
+{"timestamp": "2026-08-26T09:10:00Z", "source_process": "outlook.exe", "event_type": "file_access", "detail": "opened attachment Q3_renewal.pdf"}
+{"timestamp": "2026-08-26T09:22:18Z", "source_process": "powershell.exe", "event_type": "network_connection", "detail": "outbound TCP 443 to secure-update-delivery.net, parent=winword.exe, encoded command flag present"}
+{"timestamp": "2026-08-26T09:23:05Z", "source_process": "powershell.exe", "event_type": "process_create", "detail": "spawned from winword.exe, base64-encoded command line, unusual parent chain"}
+{"timestamp": "2026-08-26T09:35:40Z", "source_process": "chrome.exe", "event_type": "network_connection", "detail": "outbound TCP 443 to news-aggregator.com, browsing"}
+{"timestamp": "2026-08-26T09:58:00Z", "source_process": "svchost.exe", "event_type": "network_connection", "detail": "outbound TCP 443 to windowsupdate.microsoft.com, routine"}
+{"timestamp": "2026-08-26T10:15:30Z", "source_process": "slack.exe", "event_type": "network_connection", "detail": "outbound TCP 443 to slack.com, routine"}

@@ -1,0 +1,4 @@
+{"timestamp": "2026-08-26T09:05:00Z", "source_process": "outlook.exe", "event_type": "file_access", "detail": "opened attachment agenda.pdf"}
+{"timestamp": "2026-08-26T09:18:30Z", "source_process": "chrome.exe", "event_type": "network_connection", "detail": "outbound TCP 443 to news-site.com, browsing"}
+{"timestamp": "2026-08-26T09:40:12Z", "source_process": "svchost.exe", "event_type": "network_connection", "detail": "outbound TCP 443 to windowsupdate.microsoft.com, routine"}
+{"timestamp": "2026-08-26T10:05:00Z", "source_process": "slack.exe", "event_type": "network_connection", "detail": "outbound TCP 443 to slack.com, routine"}

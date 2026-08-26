@@ -1,0 +1,20 @@
+[project]
+name = "org-c"
+version = "0.1.0"
+description = "Pollen Mesh — org_c's isolated Flower AgentApp"
+dependencies = [
+    "flwr[simulation]>=1.25.0",
+    "requests>=2.31.0",
+]
+
+[tool.flwr.app]
+publisher = "pollen-mesh"
+
+[tool.flwr.app.components]
+agentapp = "org_c.agent:app"
+
+[tool.flwr.app.config.agent]
+org_id = "org_c"
+log_path = "data/mock_log.jsonl"
+server_url = "http://localhost:8000/api/signatures"
+model = "/models/Kimi-K2.7-Code"
