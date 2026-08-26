@@ -1,10 +1,13 @@
 [project]
 name = "pollen-mesh-agent"
-version = "0.1.0"
+version = "0.1.1"
 description = "Triage your own security log locally and share only a stripped, hashed signature — so cross-organization threat correlation never requires handing over raw telemetry."
 license = { file = "LICENSE" }
 readme = "README.md"
-requires-python = ">=3.10"
+# Must not be wider than flwr's own floor (>=3.11,<4.0), or uv fails to resolve
+# on the runner: a wider range forces resolution for Python versions flwr
+# doesn't support.
+requires-python = ">=3.11,<4.0"
 dependencies = [
     "flwr>=1.35.0,<2.0",
     "requests>=2.31.0",
