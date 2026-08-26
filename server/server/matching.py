@@ -66,7 +66,14 @@ def process_new_signature(sig: SignatureRecord) -> str | None:
     window_end = max(_parse(c.window_end) for c in contributing).isoformat()
 
     for match in store.matches.values():
-        if match.status != "pending" or match.technique != sig.technique:
+        if match.status != "pending":
+            continue
+        same_technique = match.technique == sig.technique
+        same_indicator = (
+            match.indicator_hash is not None
+            and match.indicator_hash == sig.indicator_hash
+        )
+        if not (same_technique or same_indicator):
             continue
         candidate_org_ids = set(match.org_ids) | {sig.org_id}
         if candidate_org_ids <= org_ids:

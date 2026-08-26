@@ -2,7 +2,7 @@
 
 **Track: Track 2 — Infrastructure (the "define your own problem" track, confirmed on the day as the successor to the pre-event "Open Exploration" framing).** Nothing about the architecture below changes for this — Track 2 explicitly permits a multi-agent project running on SuperGrid or a local SuperLink. The one open decision Track 2 grants: stick with SuperGrid's managed model access (simpler, assumed throughout this spec), or stand up a local SuperLink against one of the AMD-hosted models (Qwen3.5 397B, Kimi-K2.7-Code, GLM-5.2, MiniMax-M3) if the default model's JSON-following on the classify/extract steps turns out unreliable in testing — Kimi-K2.7-Code is the natural fallback for that, being tuned for strict structured output.
 
-**Running this solo** — the §11 team split below was written for a team of up to four; it's kept as a reference for what each piece of work looks like in isolation; being solo just means the same order of operations applies serially: get `org_a` verified end-to-end against the live SDK first (since it's the piece gated on external Flower account/login access), then replicate the pattern to `org_b`/`org_c`, with `server/` and `client/` already built.
+**Team of two.** The §11 team split below was written for up to four people; with two, the core-build roles it describes (`org_a`→`org_b`/`org_c`, `server/`, `client/`) are already done as of 2026-08-26 — see §0b for the org agents, all verified working end to end for real against the live SDK. What's left is closer to Person D's role: demo rehearsal, README, repo hygiene, Flower Hub publishing, plus whatever polish/stretch work (§9) there's time for. See §11 for how that's split between the two of you.
 
 **This is a specification, not a codebase.** It describes exactly what every piece must do — every field, every endpoint's contract, every rule the matching logic follows, every screen's exact content — without pre-writing the implementation. The reasoning is deliberate: writing the actual code should happen against the real, installed Flower SDK (see §0), not against a guess of it, and a detailed behavioral spec lets whoever builds each piece choose their own implementation while still landing on something that fits every other piece exactly. Nothing described below is optional detail — if it's in this file, it's a requirement.
 
@@ -25,6 +25,50 @@ The commands below were actually run against a real `pip install flwr` (not just
 
 **Still unresolved — needs the user, not more doc-reading:**
 - `agent.responses.create()` dispatches to a **child model task created through the SuperLink** (`self._stub.CreateTask(CreateTaskRequest(type=TaskType.MODEL, model_ref=model))`) — model calls are routed through Flower's own control plane, not a locally-held API key. Likewise `uv run flwr run . supergrid --stream` targets a federation named/aliased `supergrid`, which per `flwr run --help` resolves to `@<account>/<federation-name>` on a SuperLink — this requires `flwr login` against an account that already has that federation and model access provisioned. **This is exactly the kind of thing to confirm with a Flower mentor on the day**: what account/org to log into, what `model_ref` string(s) are valid, and whether `supergrid` is a hackathon-provided federation name or something each team must create with `flwr federation create`. Nothing about this can be resolved by reading the SDK locally — there's no offline/no-login simulation path surfaced by `flwr --help`.
+
+## 0b. Verified via a real end-to-end Track 2 run (2026-08-26, `orgs/org_a` and `orgs/org_b` both live)
+
+The `supergrid`/`flwr login` path above turned out not to be how Track 2 actually works. What's confirmed by an actual successful run — real model calls, real cross-org hash match created on the server — supersedes §0 wherever they conflict:
+
+- **No `flwr login` needed at all.** `flwr run .` with no SUPERLINK argument defaults to a connection named `local` (`DEFAULT_FLOWER_CONFIG_TOML` in `flwr/cli/constant.py`), which auto-launches a local SuperLink (`flower-superlink.exe --insecure --simulation ...`) on demand. This is what a bare `flwr login` was doing when it appeared to hang — it was silently starting that same local SuperLink, not prompting for anything. Track 2's model access route is: local SuperLink + a per-model `FLWR_MODEL_API_KEY` / `FLWR_MODEL_API_ENDPOINT` pair, **not** SuperGrid's managed/OAuth path.
+- **The local SuperLink is a persistent daemon that outlives the CLI command.** It keeps running in the background after `flwr run` exits, and every subsequent `flwr run` reuses it — including whatever environment variables were set when it first started. Changing `FLWR_MODEL_API_KEY`/`FLWR_MODEL_API_ENDPOINT` in your shell and re-running does **nothing** until you kill the existing `flower-superlink.exe` (and its `flower-superexec.exe` children) so a fresh one spawns and inherits the new values. Symptom if you forget this: identical errors across attempts that should differ.
+- **Track 2's shared model endpoints are four separate raw URLs, not a routing key on Flower's own gateway.** `FLWR_MODEL_API_KEY` alone is not sufficient — `FLWR_MODEL_API_ENDPOINT` must point at the specific model's own address, or every request silently falls back to Flower's own `https://api.flower.ai/v1/responses` and gets `401 Unsupported API key version` for literally any key value (confirmed: this happens even with the two real, organizer-issued keys). The four confirmed pairs:
+
+  | Model | `FLWR_MODEL_API_ENDPOINT` | `model` field to send | `FLWR_MODEL_API_KEY` |
+  |---|---|---|---|
+  | Qwen3.5 397B | `http://129.212.182.232:8001/v1/responses` | `/models/Qwen3.5-397B-A17B-FP8` | any non-empty string — this endpoint doesn't check it |
+  | Kimi-K2.7-Code | `http://134.199.193.245:8001/v1/responses` | `/models/Kimi-K2.7-Code` | any non-empty string — this endpoint doesn't check it |
+  | GLM-5.2 | `http://129.212.179.194:8001/v1/responses` | `glm-5.2-fp8` | organizer-issued key (Slack) |
+  | MiniMax-M3 | `http://165.245.135.52:8001/v1/responses` | `minimax-m3` | organizer-issued key (Slack) |
+
+  Note the `model` field is the **Model ID** column, not the display name — sending `"Kimi-K2.7-Code"` instead of `"/models/Kimi-K2.7-Code"` is a different, likely-invalid value as far as that server is concerned. `orgs/*/pyproject.toml` default to Kimi via `agent.model = "/models/Kimi-K2.7-Code"` (recommended in the track note at the top of this file, and it needs no real key).
+- **Kimi (and likely the other reasoning-tuned models) emit a `reasoning` output item before the `message` item.** `response["output"]` is a list; the first element can be `{"type": "reasoning", "content": [{"type": "reasoning_text", "text": "..."}]}` — plain prose, not JSON. Naively taking the first `content[].text` found anywhere in `output` grabs the reasoning trace and fails to parse as JSON. Must filter for `item["type"] == "message"` specifically before reading its `content[].text`. See `_extract_structured_output` in `orgs/org_a/org_a/agent.py`.
+- **`.csv` cannot be packaged into a FAB.** The FAB builder's include list is a hard, non-overridable allowlist — `**/*.py`, `**/*.toml`, `**/*.md`, `**/*.yaml`, `**/*.yml`, `**/*.json`, `**/*.jsonl`, `/LICENSE` (`FAB_INCLUDE_PATTERNS` in `flwr/common/constant.py`) — and `[tool.flwr.app] fab-include` in pyproject.toml can only *narrow* which files are considered, never add an extension outside that list back in. §7's mock logs are therefore shipped as `.jsonl` (one JSON object per line, same fields) instead of `.csv` — a direct instance of §3 rule 4 ("the installed SDK overrules this document"). The server's optional `GET /api/orgs/{id}/log` and the client's Org Node page both read `.jsonl` accordingly.
+- **`[tool.flwr.app] publisher` is a required field**, undocumented anywhere in the original spec pass. Missing it fails `pyproject.toml` validation outright. Each org's pyproject.toml sets `publisher = "pollen-mesh"`.
+- **Windows console encoding will crash a run that reaches a live model.** Model output routinely contains characters (arrows, em dashes, curly quotes) that Windows' legacy per-locale codepage (`cp1252` here) can't encode, and an uncaught `print()` of one kills the whole AgentApp task with `UnicodeEncodeError` — this is not hypothetical, it happened on the very first real classify call. Two independent fixes, both needed: (1) inside the agent, `sys.stdout.reconfigure(encoding="utf-8", errors="replace")` before any `print()`, so the task process itself never crashes; (2) `PYTHONIOENCODING=utf-8` set in the shell before `uv run flwr run . --stream`, so the *CLI's own* log-streaming display (a separate process) doesn't silently stop rendering mid-run — this happened too, and it looks like the run just stopped, when in fact the SuperLink's own log confirms it kept processing every row to completion server-side the whole time. Set `PYTHONIOENCODING=utf-8` before every `flwr run` in §4.6 and during the live demo.
+- **Run config overrides for testing:** `--run-config "agent.server_url='http://localhost:PORT/api/signatures'"` (note the inner single-quotes around the string value) reliably overrides a `[tool.flwr.app.config.agent]` key from the CLI without editing pyproject.toml — useful for pointing at a non-default server port during rehearsal.
+
+### 0c. Handoff checklist — org agents (Shritesh)
+
+**Not a from-scratch task — the commit you have already contains all three org agents fully built and verified working end to end**, including a real cross-org match created from real model calls (§0b). `orgs/org_a/org_a/agent.py`, `org_b`, `org_c` are functionally identical (all three read `agent.org_id` etc. generically from run config); each has its own `pyproject.toml` and its own `data/mock_log.jsonl`. Nothing here needs rewriting from scratch — your job is to get it running on your machine, then make it *strong*, not to re-architect it. Don't touch `client/` — that's the other half of the team.
+
+**Step 1 — get it running on your machine (do this first, it's quick):**
+
+1. Local SuperLink state and `.flwr` app installs are per-machine, not carried by git — install `uv` and do a fresh local run to prove it works from your side.
+2. Set the model env vars before your first run — see the table in §0b. Fastest path: Kimi-K2.7-Code needs no real key. `export FLWR_MODEL_API_KEY=<anything>`, `export FLWR_MODEL_API_ENDPOINT=http://134.199.193.245:8001/v1/responses`, `export PYTHONIOENCODING=utf-8` (harmless on non-Windows, necessary on it), then `cd orgs/org_a && uv sync && uv run flwr run . --stream`.
+3. If you change those env vars and a run doesn't reflect the change, kill the running `flower-superlink`/`flower-superexec` processes first — it's a persistent daemon that keeps the environment it first started with (§0b). This is the single most confusing failure mode if you don't know about it going in.
+4. Run all three orgs against a live `server/` (not just one in isolation) and confirm `GET /api/matches` shows a `pending` match with `org_ids: ["org_a", "org_b"]` — that's the actual thing being demoed, not any one org's console output.
+5. Free port 8000 if something else is squatting on it (happened on the original dev machine, may not apply to yours) — org configs and the client both default to it.
+
+**Step 2 — make it strong (this is the real work; roughly in priority order):**
+
+1. **Standardize the `technique` field the model produces — this is the biggest real weakness found in live testing.** Independently running `org_a` and `org_b` against the identical underlying attack pattern produced two *different* technique strings: `office_child_process_with_encoded_powershell` from one, `T1059.001` from the other. §4.5 says the field should be "ideally a MITRE ATT&CK id," but nothing currently enforces that, and free-text labels will essentially never match across two independent model calls. Today's demo pair only correlated because they *also* shared an identical `indicator_hash` (§5.5 rule 1a — I already fixed a related bug in `server/matching.py` today so a match now extends on indicator-hash equality even when technique strings differ, not just on technique equality as originally written). But rule 1b — the technique + time-window fallback, for cases with *no* shared indicator — is currently close to useless if technique labels are this inconsistent, and the Correlator page's per-technique grouping/coloring will look incoherent with free-text labels. Fix at the source: tighten `EXTRACT_INSTRUCTIONS`/`EXTRACT_SCHEMA` in `agent.py` to require a real MITRE ATT&CK ID (pattern like `T\d{4}(\.\d{3})?`), and add a deterministic validation step next to the existing guard-rail check that rejects/retries a signature whose `technique` doesn't match that shape, instead of trusting the model's word for it — same philosophy as the existing IPv4/hostname guard-rail.
+2. **Retry transient model-call failures instead of dropping the row on the first error.** Right now one flaky network blip on the *one* row that makes the demo work silently drops it with no recovery. Add 1–2 retries with a short backoff around the `agent.responses.create()` calls in `_classify`/`_extract` before giving up on a row.
+3. **Write real automated tests for the deterministic pieces** — `_normalize_indicator`/`_hash_indicator` (confirm `http://X`, `https://X.`, ` X `, `X/` all hash identically — this is the entire reason cross-org matching works), `_has_identifying_content` (feed it an IPv4, a "corp"/"internal"/"hostname" token, and confirm it rejects), `_valid_timestamp`, and `_extract_structured_output` against a fixture of the *actual* Kimi response shape (reasoning item before message item — captured live today, see §0b) so a future model/prompt change can't silently regress this parsing again.
+4. **Better failure diagnostics.** The current `except requests.RequestException` print doesn't show the response body on a non-2xx from the server — add that, so a malformed payload (schema mismatch, bad confidence range) is diagnosable live instead of just showing a status code.
+5. **Sanity-clamp what the model hands back before trusting it** — `confidence` clamped to `[0.0, 1.0]`, and reject a signature whose `technique`/`indicator` come back as an empty string, the same system-boundary skepticism already applied to the redaction guard-rail.
+6. **Verify the "org C joins late" flourish end to end against the fixed server** — `orgs/org_c/data/mock_log_flourish_row.jsonl` has the exact row; append it to `mock_log.jsonl`, re-run `org_c`, confirm the *same* match's `org_ids` grows to three (this now works per the matching.py fix, but prove it live before relying on it in the actual demo).
+7. **Optional, only if 1–6 are solid and there's time:** try GLM-5.2/MiniMax-M3 (real keys in §0b's table) as a fallback only if Kimi's JSON-following gets flaky under repeated testing; or add a second, distinct attack pattern to the mock logs (beyond the one scripted campaign row) to make the technical-execution/impact story less obviously a single scripted demo path.
 
 ---
 
@@ -137,11 +181,19 @@ What actually gets sent to the server additionally includes `org_id` (string) an
 
 ### 4.6 Run commands (one terminal per org)
 
+Superseded by §0b: no `supergrid`/`flwr login` — target the default local SuperLink, with the shared model endpoint's key/URL/`PYTHONIOENCODING` set in each shell first (see §0b for the full model table and why each var is needed):
+
 ```
-cd orgs/org_a && uv sync && uv run flwr run . supergrid --stream
-cd orgs/org_b && uv sync && uv run flwr run . supergrid --stream
-cd orgs/org_c && uv sync && uv run flwr run . supergrid --stream
+export FLWR_MODEL_API_KEY="<anything non-empty for Kimi>"
+export FLWR_MODEL_API_ENDPOINT="http://134.199.193.245:8001/v1/responses"
+export PYTHONIOENCODING="utf-8"
+
+cd orgs/org_a && uv sync && uv run flwr run . --stream
+cd orgs/org_b && uv sync && uv run flwr run . --stream
+cd orgs/org_c && uv sync && uv run flwr run . --stream
 ```
+
+If you change `FLWR_MODEL_API_KEY`/`FLWR_MODEL_API_ENDPOINT` between runs, kill the running `flower-superlink.exe` (and its `flower-superexec.exe` children) first — per §0b it's a persistent daemon that keeps the environment it first started with.
 
 Start `server/` first, then `client/`, so there's somewhere for the signature POSTs to land before any org process runs.
 
@@ -384,7 +436,14 @@ Keep the narration anchored to the six things judges are actually scoring (§12)
 
 ---
 
-## 11. Team split (reference — this run is solo; see the note at the top of this file)
+## 11. Team split (two people, as of 2026-08-26 — original four-role version kept below for reference)
+
+The original plan below assumed up to four people on `org_a`→`org_b`/`org_c`, `server/`, `client/`, and a floating Person D. All three of those core-build roles are done — see §0b for the org agents (verified live), and the earlier build passes for `server/` (fully implemented and tested) and `client/` (all six pages built per §6.4–6.5). What's actually left, split two ways:
+
+- **Person 1** — Flower Hub publishing, README (public-facing, "open-source" per §9's mandatory submission items), GitHub repo setup, team details/track/description for submission, repo hygiene.
+- **Person 2** — demo rehearsal against the 3–5 minute timer (§10), walking a match through Approve → Resolution live in the browser to confirm the full loop, and whichever stretch item (§9) there's time for: the "org C joins late" flourish, verifying `org_c`'s own live run, or trying GLM-5.2/MiniMax-M3 with the real organizer keys as a fallback if Kimi's JSON-following gets flaky under demo conditions.
+
+Adjust freely — this is a starting split, not a hard assignment. Original four-role reference:
 
 - **Person A** — `orgs/org_a`, built and verified end to end against the live SDK, then the same pattern applied to `org_b`/`org_c`.
 - **Person B** — `server/`, entirely: the data model, the matching algorithm, every endpoint. The most central piece; same language as the org agents, so this person can also unblock Person A.
