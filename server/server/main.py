@@ -56,6 +56,14 @@ def _require_demo_mode() -> None:
         )
 
 
+@app.on_event("startup")
+def _seed_demo_logs() -> None:
+    """Ensure each demo org has a working log (copied from its committed seed)
+    so the dashboard's log views work before any attack is launched."""
+    for org_id in ORG_IDS:
+        attacks.ensure_working_log(org_id)
+
+
 @app.get("/")
 def health() -> dict[str, str]:
     return {"status": "ok", "service": "pollen-mesh-server"}
@@ -368,7 +376,8 @@ def org_log(org_id: str) -> list[dict[str, str]]:
     AgentApp bundle, so each org's own mock log is JSONL and this endpoint
     matches that.
     """
-    log_path = REPO_ROOT / "orgs" / org_id / "data" / "mock_log.jsonl"
+    attacks.ensure_working_log(org_id)  # seed the working log from its committed seed if needed
+    log_path = attacks.log_path(org_id)
     if not log_path.exists():
         raise HTTPException(
             status_code=404,

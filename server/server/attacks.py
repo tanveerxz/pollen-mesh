@@ -187,26 +187,31 @@ SCENARIOS_BY_ID = {s.id: s for s in SCENARIOS}
 
 
 def log_path(org_id: str) -> Path:
+    """The working log — mutated by attacks at runtime, so it is gitignored."""
     return REPO_ROOT / "orgs" / org_id / "data" / "mock_log.jsonl"
 
 
-def baseline_path(org_id: str) -> Path:
-    return REPO_ROOT / "orgs" / org_id / "data" / "mock_log.baseline.jsonl"
+def seed_path(org_id: str) -> Path:
+    """The committed pristine log. The working log is (re)generated from this,
+    so runtime mutations never dirty git and a reset is always clean."""
+    return REPO_ROOT / "orgs" / org_id / "data" / "mock_log.seed.jsonl"
 
 
-def _ensure_baseline(org_id: str) -> None:
-    """Snapshot the pristine log once, so a reset can always restore it."""
-    src, dst = log_path(org_id), baseline_path(org_id)
-    if src.exists() and not dst.exists():
+def ensure_working_log(org_id: str) -> None:
+    """Make sure the working log exists, seeding it from the committed seed."""
+    src, dst = seed_path(org_id), log_path(org_id)
+    if not dst.exists() and src.exists():
+        dst.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(src, dst)
 
 
 def restore_logs(org_ids: list[str]) -> dict[str, bool]:
+    """Reset each org's working log to its committed pristine seed."""
     restored: dict[str, bool] = {}
     for org_id in org_ids:
-        base = baseline_path(org_id)
-        if base.exists():
-            shutil.copyfile(base, log_path(org_id))
+        seed = seed_path(org_id)
+        if seed.exists():
+            shutil.copyfile(seed, log_path(org_id))
             restored[org_id] = True
         else:
             restored[org_id] = False
@@ -214,10 +219,10 @@ def restore_logs(org_ids: list[str]) -> dict[str, bool]:
 
 
 def append_rows(org_id: str, rows: list[dict[str, str]]) -> int:
+    ensure_working_log(org_id)
     path = log_path(org_id)
     if not path.parent.exists():
         raise FileNotFoundError(f"No data directory for '{org_id}' at {path.parent}")
-    _ensure_baseline(org_id)
     with path.open("a", encoding="utf-8") as f:
         for row in rows:
             f.write(json.dumps(row) + "\n")
@@ -379,6 +384,7 @@ def hunt_local(org_id: str, indicator_hash: str) -> list[dict[str, object]]:
     telling it what the indicator actually was, and without sending its logs
     anywhere. Runs entirely against that org's own file.
     """
+    ensure_working_log(org_id)
     path = log_path(org_id)
     if not path.exists():
         return []

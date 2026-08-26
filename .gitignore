@@ -41,7 +41,10 @@ Thumbs.db
 .vercel
 coverage/
 
-# Attack-scenario log baselines (generated at runtime by the server)
+# Org working logs — regenerated from the committed *.seed.jsonl and mutated by
+# the attack console at runtime, so they must never be committed. The seed is
+# the tracked pristine content; the working copy is derived from it.
+mock_log.jsonl
 *.baseline.jsonl
 
 # Claude Code local config and secrets — never commit

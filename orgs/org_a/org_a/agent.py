@@ -217,6 +217,14 @@ def main(agent: AgentSession, context: Context) -> None:
     if not log_path.is_absolute():
         log_path = Path(__file__).resolve().parent.parent / log_path
 
+    # The working log is gitignored (attacks mutate it); regenerate it from the
+    # committed seed if it's absent — e.g. on a fresh clone or FAB build.
+    if not log_path.exists():
+        seed = log_path.with_name(log_path.stem + ".seed" + log_path.suffix)
+        if seed.exists():
+            log_path.parent.mkdir(parents=True, exist_ok=True)
+            log_path.write_text(seed.read_text(encoding="utf-8"), encoding="utf-8")
+
     with log_path.open(encoding="utf-8") as f:
         rows = [json.loads(line) for line in f if line.strip()]
 

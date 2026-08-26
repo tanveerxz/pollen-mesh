@@ -57,6 +57,7 @@ function MatchCard({ match }: { match: MatchRecord }) {
       refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
+      refresh(); // if the match is gone (e.g. server reset), resync so the stale card clears
     } finally {
       setBusy(null);
     }
