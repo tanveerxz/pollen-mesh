@@ -47,22 +47,39 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def _require_demo_mode() -> None:
-    """Guard endpoints that fabricate or drive the demo orgs."""
-    if not store.demo_mode:
-        raise HTTPException(
-            status_code=403,
-            detail="Not available in real mode — the attack console and local "
-            "agent runner only exist for the demo orgs.",
-        )
-
-
 @app.on_event("startup")
 def _seed_demo_logs() -> None:
     """Ensure each demo org has a working log (copied from its committed seed)
     so the dashboard's log views work before any attack is launched."""
     for org_id in ORG_IDS:
         attacks.ensure_working_log(org_id)
+
+
+def _require_demo_mode(what: str = "This") -> None:
+    """Refuse anything that fabricates, drives, or reads the demo orgs.
+
+    In demo mode the server also plays the part of the three demo orgs' own
+    machines, so it may read their logs. A real org runs its own agent on its
+    own infrastructure and only ever POSTs a stripped signature in — the server
+    must never be able to read its telemetry.
+    """
+    if not store.demo_mode:
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                f"{what} is demo-mode only. A real org's raw log is never readable "
+                "by the correlator — run the agent's own hunt mode instead."
+            ),
+        )
+
+
+def _require_demo_org(org_id: str, what: str) -> None:
+    record = store.orgs.get(org_id)
+    if record is not None and record.kind != "demo":
+        raise HTTPException(
+            status_code=403,
+            detail=f"{what} is not available for real orgs — their logs never reach the correlator.",
+        )
 
 
 @app.get("/")
@@ -369,11 +386,19 @@ def org_status(org_id: str) -> OrgStatus:
 
 @app.get("/api/orgs/{org_id}/hunt")
 def org_hunt(org_id: str, indicator_hash: str) -> dict[str, object]:
-    """Search one org's own log for a disclosed indicator hash.
+    """Retro-hunt a DEMO org's log for a disclosed indicator hash.
 
-    The org never receives the raw indicator — it hashes its own tokens and
-    compares. See attacks.hunt_local.
+    The real implementation of this lives in the agent (`hunt_own_log`), where
+    it belongs: a real org hunts its own logs on its own machine and the
+    correlator never sees them. A correlator that greps your raw logs is
+    precisely what this system exists to avoid.
+
+    This endpoint is the demo-mode stand-in, and is only defensible because in
+    demo mode the server IS the three demo orgs' machine. It is refused
+    outright in real mode.
     """
+    _require_demo_mode("retro-hunt")
+    _require_demo_org(org_id, "retro-hunt")
     hits = attacks.hunt_local(org_id, indicator_hash)
     return {"org_id": org_id, "indicator_hash": indicator_hash, "hits": hits}
 
@@ -387,6 +412,8 @@ def org_log(org_id: str) -> list[dict[str, str]]:
     AgentApp bundle, so each org's own mock log is JSONL and this endpoint
     matches that.
     """
+    _require_demo_mode("reading a raw log")
+    _require_demo_org(org_id, "reading a raw log")
     attacks.ensure_working_log(org_id)  # seed the working log from its committed seed if needed
     log_path = attacks.log_path(org_id)
     if not log_path.exists():

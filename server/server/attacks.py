@@ -26,7 +26,9 @@ created this way are returned to the caller so the UI can label them.
 from __future__ import annotations
 
 import hashlib
+import hmac
 import json
+import os
 import re
 import shutil
 from dataclasses import dataclass, field
@@ -232,6 +234,22 @@ def append_rows(org_id: str, rows: list[dict[str, str]]) -> int:
 # ---------------------------------------------------------------- detection
 
 
+CONSORTIUM_KEY_ENV = "POLLEN_CONSORTIUM_KEY"
+DEMO_CONSORTIUM_KEY = "pollen-mesh-public-demo-key-not-for-real-use"
+
+
+def _consortium_key() -> bytes:
+    """The consortium secret — MUST stay identical to the agents'.
+
+    The correlator holding this key at all is a DEMO-MODE-ONLY concession: in
+    demo mode the server also plays the part of the three demo orgs' own
+    machines, so it does the hashing they would do. In real mode the server
+    never hashes anything — external agents arrive with values already keyed,
+    and the server only ever compares them. See docs/threat-model.md.
+    """
+    return os.environ.get(CONSORTIUM_KEY_ENV, DEMO_CONSORTIUM_KEY).encode("utf-8")
+
+
 def normalize_indicator(raw: str) -> str:
     """Identical to _normalize_indicator in the org agents."""
     value = raw.strip().lower()
@@ -240,8 +258,12 @@ def normalize_indicator(raw: str) -> str:
 
 
 def hash_indicator(raw: str) -> str:
-    """Identical to _hash_indicator in the org agents."""
-    return hashlib.sha256(normalize_indicator(raw).encode("utf-8")).hexdigest()[:16]
+    """Identical to _hash_indicator in the org agents — keyed, not a bare hash."""
+    return hmac.new(
+        _consortium_key(),
+        normalize_indicator(raw).encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()[:16]
 
 
 def analyse_row(row: dict[str, str]) -> dict[str, object] | None:

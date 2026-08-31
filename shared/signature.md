@@ -25,7 +25,7 @@ process for it.
 {
   "org_id": "org_a",
   "technique": "T1071.001",
-  "indicator": "39b83e8cf8e2dd93",
+  "indicator": "12f23ed9d97811dd",
   "window_start": "2026-08-26T09:14:02Z",
   "window_end": "2026-08-26T09:14:02Z",
   "confidence": 0.85

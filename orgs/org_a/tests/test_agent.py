@@ -10,12 +10,15 @@ actual Kimi response shape (reasoning item before message item, captured live
 import pytest
 
 from org_a.agent import (
+    DEMO_CONSORTIUM_KEY,
     _TECHNIQUE_RE,
+    _consortium_key,
     _hash_indicator,
     _leaks_identity,
     _normalize_indicator,
     _structured_output,
     extract_indicator,
+    hunt_own_log,
 )
 
 # --- indicator normalization + hashing: WHY cross-org matching works ---------
@@ -34,10 +37,53 @@ def test_hash_identical_across_formatting_variants():
 
 
 def test_hash_locks_the_demo_value():
+    """Under the default demo key, every live run must reproduce this value.
+
+    Changed on 2026-08-27 when the bare sha256 became a consortium-keyed HMAC.
+    The old value (39b83e8cf8e2dd93) was recoverable in 121 guesses.
+    """
     h = _hash_indicator("secure-update-delivery.net")
-    assert h == "39b83e8cf8e2dd93"  # the cross-org hash every live run must reproduce
+    assert h == "12f23ed9d97811dd"
     assert len(h) == 16
     int(h, 16)  # raises if not hex
+
+
+def test_hash_is_keyed_not_a_bare_digest(monkeypatch):
+    """Regression guard for the break in docs/threat-model.md.
+
+    A bare sha256 of a domain is reversible: the preimage space is enumerable,
+    and the previously published value fell in 121 attempts. If someone ever
+    reverts _hash_indicator to an unkeyed digest, this fails.
+    """
+    import hashlib
+
+    monkeypatch.setenv("POLLEN_CONSORTIUM_KEY", "a-real-consortium-secret")
+    indicator = "secure-update-delivery.net"
+    unkeyed = hashlib.sha256(indicator.encode("utf-8")).hexdigest()[:16]
+    assert _hash_indicator(indicator) != unkeyed
+
+
+def test_different_keys_give_different_hashes(monkeypatch):
+    """Two consortia must not be able to correlate against each other."""
+    monkeypatch.setenv("POLLEN_CONSORTIUM_KEY", "consortium-one")
+    first = _hash_indicator("secure-update-delivery.net")
+    monkeypatch.setenv("POLLEN_CONSORTIUM_KEY", "consortium-two")
+    second = _hash_indicator("secure-update-delivery.net")
+    assert first != second
+
+
+def test_same_key_matches_across_orgs(monkeypatch):
+    """The property the whole system rests on: two orgs, same key, same value,
+    with neither having seen the other's data."""
+    monkeypatch.setenv("POLLEN_CONSORTIUM_KEY", "shared-consortium-secret")
+    org_a_sees = _hash_indicator("https://secure-update-delivery.net/")
+    org_b_sees = _hash_indicator("secure-update-delivery.net")
+    assert org_a_sees == org_b_sees
+
+
+def test_demo_key_is_used_when_unset(monkeypatch):
+    monkeypatch.delenv("POLLEN_CONSORTIUM_KEY", raising=False)
+    assert _consortium_key() == DEMO_CONSORTIUM_KEY.encode("utf-8")
 
 
 def test_different_indicators_hash_differently():
@@ -176,3 +222,40 @@ def test_raises_when_no_message_item_exists():
     reasoning_only = {"output": [KIMI_RESPONSE_FIXTURE["output"][0]]}
     with pytest.raises(ValueError):
         _structured_output(reasoning_only)
+
+
+# --- retro-hunt: the org searches its OWN log, never the correlator ----------
+
+
+def _rows():
+    return [
+        {"timestamp": "2026-08-26T09:02:11Z", "source_process": "chrome.exe",
+         "event_type": "network_connection", "detail": "outbound TCP 443 to news-site.com, browsing"},
+        {"timestamp": "2026-08-26T09:14:02Z", "source_process": "powershell.exe",
+         "event_type": "network_connection",
+         "detail": "outbound TCP 443 to secure-update-delivery.net, parent=winword.exe"},
+        {"timestamp": "2026-08-26T09:20:10Z", "source_process": "svchost.exe",
+         "event_type": "network_connection", "detail": "outbound TCP 443 to windowsupdate.microsoft.com, routine"},
+    ]
+
+
+def test_hunt_finds_the_event_from_only_a_hash():
+    """The disclosed value is opaque; the org re-derives it over its own tokens."""
+    disclosed = _hash_indicator("secure-update-delivery.net")
+    hits = hunt_own_log(_rows(), disclosed)
+    assert len(hits) == 1
+    assert hits[0]["row"] == 1
+    assert hits[0]["source_process"] == "powershell.exe"
+
+
+def test_hunt_finds_nothing_when_never_hit():
+    disclosed = _hash_indicator("some-other-attacker-domain.net")
+    assert hunt_own_log(_rows(), disclosed) == []
+
+
+def test_hunt_needs_the_same_key(monkeypatch):
+    """An org in a different consortium cannot hunt our disclosures."""
+    monkeypatch.setenv("POLLEN_CONSORTIUM_KEY", "consortium-one")
+    disclosed = _hash_indicator("secure-update-delivery.net")
+    monkeypatch.setenv("POLLEN_CONSORTIUM_KEY", "consortium-two")
+    assert hunt_own_log(_rows(), disclosed) == []

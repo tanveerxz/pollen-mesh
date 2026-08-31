@@ -14,15 +14,39 @@ only thing it ever emits is an anonymized signature:
 | Field | Example | Notes |
 |---|---|---|
 | `technique` | `T1059.001` | MITRE ATT&CK id |
-| `indicator` | `39b83e8cf8e2dd93` | SHA-256 of the indicator, truncated — **never the raw value** |
+| `indicator` | `12f23ed9d97811dd` | Consortium-keyed HMAC-SHA256, truncated — **never the raw value**, and not reversible without the key |
 | `window_start` / `window_end` | `2026-08-26T09:14:02Z` | when it was seen |
 | `confidence` | `0.9` | 0.0–1.0 |
 
 No log lines. No hostnames, usernames, or IP addresses. No company identifiers.
 
 Two organizations hit by the same attacker infrastructure independently produce the
-**same hash**, so a correlator can match them without either side ever disclosing what
+**same value**, so a correlator can match them without either side ever disclosing what
 the indicator was — or that it was them.
+
+### Why the indicator is keyed, not just hashed
+
+A bare `sha256(domain)` is **not** private. Domains are a small, enumerable space: an
+earlier version of this agent published `39b83e8cf8e2dd93`, and it was recovered in
+**121 guesses** from a trivial wordlist. Anyone holding the correlator's database —
+including whoever operates it — could reverse every indicator instantly.
+
+So the indicator is keyed with a secret shared by consortium members:
+
+```
+indicator = HMAC-SHA256(consortium_key, normalized_indicator)[:16]
+```
+
+Members hold the key. **The correlator never receives it.** Equal indicators still
+produce equal values, so matching is unchanged — but the correlator can match without
+being able to learn what it matched, and an outsider cannot enumerate at all.
+
+Set `POLLEN_CONSORTIUM_KEY` to your consortium's own secret. The built-in default is
+public and exists only so `git clone && run` works; with it, the values *are* reversible.
+
+**What this does not solve:** a malicious consortium *member* has the key and can still
+brute-force. HMAC stops outsiders, not insiders. Private set intersection is the
+honest next step.
 
 ## How it works
 

@@ -11,7 +11,9 @@ of this app serves any organization.
 from __future__ import annotations
 
 import hashlib
+import hmac
 import json
+import os
 import re
 import sys
 import time
@@ -28,6 +30,12 @@ app = AgentApp()
 # without this a stray arrow or em dash kills the whole run (see CLAUDE.md §0b).
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
+CONSORTIUM_KEY_ENV = "POLLEN_CONSORTIUM_KEY"
+# Well-known default so `git clone && run` works with no setup. A real
+# consortium MUST set POLLEN_CONSORTIUM_KEY to its own secret — with this
+# default the indicator hashes are reversible by anyone who reads this file.
+DEMO_CONSORTIUM_KEY = "pollen-mesh-public-demo-key-not-for-real-use"
 
 REQUEST_TIMEOUT_SECONDS = 5.0
 MODEL_ATTEMPTS = 3           # transient failures are common; retry before giving up
@@ -189,6 +197,18 @@ def extract_indicator(row: dict[str, str]) -> str | None:
     return None
 
 
+def _consortium_key() -> bytes:
+    """The shared secret that makes an indicator hash unreversible.
+
+    Held by consortium MEMBERS only. The correlator never receives it, which is
+    what lets it match two signatures without being able to learn what it
+    matched. Without a key, `sha256(domain)` is trivially reversible: the
+    preimage space is just "domains", and the value published in our own README
+    was recovered in 121 guesses. See docs/threat-model.md.
+    """
+    return os.environ.get(CONSORTIUM_KEY_ENV, DEMO_CONSORTIUM_KEY).encode("utf-8")
+
+
 def _normalize_indicator(raw: str) -> str:
     value = raw.strip().lower()
     value = re.sub(r"^[a-z]+://", "", value)
@@ -196,7 +216,49 @@ def _normalize_indicator(raw: str) -> str:
 
 
 def _hash_indicator(raw: str) -> str:
-    return hashlib.sha256(_normalize_indicator(raw).encode("utf-8")).hexdigest()[:16]
+    """Keyed HMAC, not a bare hash — see _consortium_key.
+
+    Two orgs holding the same key still produce identical values for the same
+    indicator, so correlation is unchanged; nobody outside the consortium can
+    enumerate the space to reverse one.
+    """
+    return hmac.new(
+        _consortium_key(),
+        _normalize_indicator(raw).encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()[:16]
+
+
+def hunt_own_log(
+    rows: list[dict[str, str]], indicator_hash: str
+) -> list[dict[str, object]]:
+    """Retro-hunt THIS org's own log for a disclosed indicator hash.
+
+    This is the whole point of keying the indicator. The org is told only an
+    opaque value; it re-derives the same value over its own tokens and compares.
+    It can discover it was hit — and find events it originally missed — without
+    ever being told what the indicator is, and without its logs leaving the
+    machine.
+
+    Deliberately implemented here, in the agent, and not on the correlator: a
+    correlator that greps your raw logs is exactly the thing this system exists
+    to avoid.
+    """
+    hits: list[dict[str, object]] = []
+    for index, row in enumerate(rows):
+        detail = row.get("detail") or ""
+        for match in _DOMAIN_RE.finditer(detail):
+            token = match.group(1).lower().rstrip(".")
+            if _hash_indicator(token) == indicator_hash:
+                hits.append({
+                    "row": index,
+                    "timestamp": row.get("timestamp"),
+                    "source_process": row.get("source_process"),
+                    "event_type": row.get("event_type"),
+                    "detail": detail,
+                })
+                break
+    return hits
 
 
 def _leaks_identity(*values: str) -> bool:
@@ -227,6 +289,21 @@ def main(agent: AgentSession, context: Context) -> None:
 
     with log_path.open(encoding="utf-8") as f:
         rows = [json.loads(line) for line in f if line.strip()]
+
+    # Hunt mode: no model calls, no submission — just answer "was I hit too?"
+    # against our own log, using a hash someone else disclosed.
+    mode = str(context.run_config.get("agent.mode", "triage"))
+    if mode == "hunt":
+        wanted = str(context.run_config.get("agent.hunt_hash", "")).strip()
+        if not wanted:
+            print(f"[{org_id}] hunt mode needs agent.hunt_hash")
+            return
+        hits = hunt_own_log(rows, wanted)
+        print(f"[{org_id}] hunted {len(rows)} local rows for {wanted}")
+        for hit in hits:
+            print(f"[{org_id}] HIT row {hit['row']} {hit['timestamp']} {hit['source_process']}")
+        print(f"[{org_id}] hunt complete — {len(hits)} matching event(s) in our own history")
+        return
 
     print(f"[{org_id}] {len(rows)} rows from {log_path.name} | model={model}")
     sent = 0
