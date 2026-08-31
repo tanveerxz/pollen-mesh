@@ -304,6 +304,46 @@ def _leaks_identity(*values: str) -> bool:
     return False
 
 
+# --- watermark ----------------------------------------------------------------
+# Without this, re-running an agent over an unchanged log re-triages every row
+# (slow, and burns model calls) and resubmits every signature it already sent,
+# so one real-world event ends up counted three times. The correlator dedupes
+# too, but an agent that knows what it has already seen is the right place to
+# stop: a re-run should cost only the rows that are actually new.
+
+
+def _row_fingerprint(row: dict[str, str]) -> str:
+    """Stable id for a log row, independent of key order and position."""
+    canonical = json.dumps(row, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:16]
+
+
+def _watermark_path(log_path: Path) -> Path:
+    return log_path.with_name(log_path.stem + ".watermark.json")
+
+
+def load_watermark(log_path: Path) -> dict[str, dict[str, str]]:
+    path = _watermark_path(log_path)
+    if not path.exists():
+        return {}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}  # a corrupt watermark means "re-process", never "crash"
+    seen = data.get("seen")
+    return seen if isinstance(seen, dict) else {}
+
+
+def save_watermark(log_path: Path, seen: dict[str, dict[str, str]]) -> None:
+    path = _watermark_path(log_path)
+    try:
+        path.write_text(
+            json.dumps({"version": 1, "seen": seen}, indent=2), encoding="utf-8"
+        )
+    except OSError as exc:  # noqa: BLE001 - a read-only dir must not fail the run
+        print(f"[watermark] could not persist: {exc}")
+
+
 @app.main()
 def main(agent: AgentSession, context: Context) -> None:
     org_id = str(context.run_config["agent.org_id"])
@@ -340,18 +380,41 @@ def main(agent: AgentSession, context: Context) -> None:
         print(f"[{org_id}] hunt complete — {len(hits)} matching event(s) in our own history")
         return
 
-    print(f"[{org_id}] {len(rows)} rows from {log_path.name} | model={model}")
+    rescan = str(context.run_config.get("agent.rescan", "")).lower() in {"1", "true", "yes"}
+    seen = {} if rescan else load_watermark(log_path)
+    new_rows = [(i, r) for i, r in enumerate(rows) if _row_fingerprint(r) not in seen]
+
+    print(
+        f"[{org_id}] {len(rows)} rows from {log_path.name} | model={model} | "
+        f"{len(new_rows)} new, {len(rows) - len(new_rows)} already triaged"
+    )
     sent = 0
 
     for i, row in enumerate(rows):
+        fingerprint = _row_fingerprint(row)
+        previous = seen.get(fingerprint)
+        if previous is not None:
+            print(
+                f"[{org_id}] row {i}: already triaged "
+                f"({previous.get('outcome', 'seen')}) — skipping"
+            )
+            continue
+
+        def remember(outcome: str, **extra: str) -> None:
+            seen[fingerprint] = {"outcome": outcome, **extra}
+            save_watermark(log_path, seen)
+
         try:
             escalate, reason = _triage(agent, model, row)
         except Exception as exc:  # noqa: BLE001
+            # Deliberately NOT watermarked: a transient failure must be retried
+            # on the next run, not silently swallowed forever.
             print(f"[{org_id}] row {i}: triage failed ({exc}) — skipping")
             continue
 
         if not escalate:
             print(f"[{org_id}] row {i}: noise — {reason[:90]}")
+            remember("noise")
             continue
 
         print(f"[{org_id}] row {i}: ESCALATE — {reason[:90]}")
@@ -359,6 +422,7 @@ def main(agent: AgentSession, context: Context) -> None:
         indicator = extract_indicator(row)
         if indicator is None:
             print(f"[{org_id}] row {i}: no external indicator to share — dropped")
+            remember("no-indicator")
             continue
 
         try:
@@ -383,6 +447,7 @@ def main(agent: AgentSession, context: Context) -> None:
 
         if _leaks_identity(technique):
             print(f"[{org_id}] row {i}: guard-rail rejected signature — dropped")
+            remember("guard-rail")
             continue
 
         indicator_hash = _hash_indicator(indicator)
@@ -404,7 +469,13 @@ def main(agent: AgentSession, context: Context) -> None:
                 f"[{org_id}] row {i}: SENT {technique} hash={indicator_hash} "
                 f"conf={confidence:.2f} -> HTTP {res.status_code}"
             )
+            # Only watermark once it is actually delivered — a failed POST must
+            # be retried on the next run.
+            remember("sent", technique=technique, indicator=indicator_hash)
         except requests.RequestException as exc:
             print(f"[{org_id}] row {i}: submission failed ({exc})")
 
-    print(f"[{org_id}] done — {sent} signature(s) released from {len(rows)} rows")
+    print(
+        f"[{org_id}] done — {sent} signature(s) released from "
+        f"{len(new_rows)} new row(s) ({len(rows)} in log)"
+    )

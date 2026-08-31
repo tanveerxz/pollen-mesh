@@ -6,10 +6,10 @@ import json
 from datetime import datetime, timezone
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 
-from server import agent_runner, attacks, store
+from server import agent_runner, attacks, persistence, store
 from server.matching import process_new_signature
 from server.models import (
     AgentRunRequest,
@@ -48,11 +48,29 @@ def _now() -> str:
 
 
 @app.on_event("startup")
-def _seed_demo_logs() -> None:
-    """Ensure each demo org has a working log (copied from its committed seed)
-    so the dashboard's log views work before any attack is launched."""
+def _startup() -> None:
+    """Restore the last snapshot, then ensure each demo org has a working log
+    (copied from its committed seed) so the log views work before any attack."""
+    if persistence.load():
+        print(
+            f"[startup] restored {len(store.signatures)} signature(s), "
+            f"{len(store.matches)} match(es) from {persistence.db_path()}"
+        )
     for org_id in ORG_IDS:
         attacks.ensure_working_log(org_id)
+
+
+@app.middleware("http")
+async def _persist_after_mutation(request: Request, call_next):
+    """Snapshot state after any request that could have changed it.
+
+    Blanket-applied rather than sprinkled through each endpoint so a new
+    mutating route cannot silently forget to persist.
+    """
+    response = await call_next(request)
+    if request.method != "GET" and response.status_code < 400:
+        persistence.save()
+    return response
 
 
 def _require_demo_mode(what: str = "This") -> None:
@@ -120,19 +138,18 @@ def register_org(payload: OrgRegisterRequest) -> OrgRecord:
 
 @app.post("/api/demo/reset")
 def demo_reset(restore_logs: bool = True) -> dict[str, object]:
-    """Clear all in-memory state so a demo can be re-run without restarting.
+    """Clear all correlation state so a demo can be re-run without restarting.
 
     Not part of §5.4's contract — added so §10 step 1 ("reset, fresh terminals")
-    doesn't require killing the process mid-demo. State is in-memory anyway
-    (§5.2), so this just does explicitly what a restart does implicitly. Also
-    rewinds each org's log file to its pre-attack baseline unless asked not to.
+    doesn't require killing the process mid-demo. Also rewinds each org's log
+    file to its pre-attack baseline unless asked not to, and drops the persisted
+    snapshot so a restart doesn't resurrect what was just cleared.
     """
     _require_demo_mode()
     cleared_signatures = len(store.signatures)
     cleared_matches = len(store.matches)
-    store.signatures.clear()
-    store.matches.clear()
-    store.reset_orgs()
+    store.clear_all()
+    persistence.wipe()
     restored = attacks.restore_logs(list(ORG_IDS)) if restore_logs else {}
     return {
         "cleared_signatures": cleared_signatures,
@@ -213,7 +230,7 @@ def _deliver_attack(
                     window_end=row["timestamp"],
                     confidence=float(verdict["confidence"]),  # type: ignore[arg-type]
                 )
-                record, match_id = _store_signature(created)
+                record, match_id, _duplicate = _store_signature(created)
                 if match_id:
                     match_ids.add(match_id)
                 detected.append(
@@ -280,8 +297,23 @@ def launch_attack(scenario_id: str, payload: AttackLaunchRequest) -> dict[str, o
     return result
 
 
-def _store_signature(payload: SignatureCreate) -> tuple[SignatureRecord, str | None]:
-    """The one path by which a signature enters the system."""
+def _store_signature(
+    payload: SignatureCreate,
+) -> tuple[SignatureRecord, str | None, bool]:
+    """The one path by which a signature enters the system.
+
+    Idempotent on (org_id, indicator_hash, window_start): re-running an agent
+    over an unchanged log resubmits everything it escalated, and a match built
+    from three copies of one event would misrepresent how much evidence there
+    actually is. The agent watermarks too, but the correlator cannot assume a
+    well-behaved submitter — so the invariant is enforced here as well.
+    """
+    duplicate = store.find_duplicate(
+        payload.org_id, payload.indicator, payload.window_start
+    )
+    if duplicate is not None:
+        return duplicate, store.match_containing(duplicate.id), True
+
     record = SignatureRecord(
         id=store.new_signature_id(),
         org_id=payload.org_id,
@@ -294,13 +326,18 @@ def _store_signature(payload: SignatureCreate) -> tuple[SignatureRecord, str | N
     )
     store.ensure_org(record.org_id)  # unknown submitter -> registered as a real org
     store.signatures.append(record)
-    return record, process_new_signature(record)
+    store.signature_keys[
+        store.dedupe_key(record.org_id, record.indicator_hash, record.window_start)
+    ] = record.id
+    return record, process_new_signature(record), False
 
 
 @app.post("/api/signatures", status_code=201, response_model=SignatureSubmitResponse)
 def submit_signature(payload: SignatureCreate) -> SignatureSubmitResponse:
-    record, match_id = _store_signature(payload)
-    return SignatureSubmitResponse(signature_id=record.id, match_id=match_id)
+    record, match_id, duplicate = _store_signature(payload)
+    return SignatureSubmitResponse(
+        signature_id=record.id, match_id=match_id, duplicate=duplicate
+    )
 
 
 @app.get("/api/signatures", response_model=list[SignatureRecord])

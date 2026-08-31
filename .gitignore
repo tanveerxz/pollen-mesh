@@ -45,8 +45,13 @@ coverage/
 # the attack console at runtime, so they must never be committed. The seed is
 # the tracked pristine content; the working copy is derived from it.
 mock_log.jsonl
+# Agent watermark: which rows this agent has already triaged (runtime state)
+mock_log.watermark.json
 *.baseline.jsonl
 
 # Claude Code local config and secrets — never commit
 # (this repo gets published publicly for the submission)
 .claude/
+
+# Persisted correlator state (snapshot DB) — never committed
+server/.pollen-state.db

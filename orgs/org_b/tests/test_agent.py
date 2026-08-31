@@ -17,9 +17,12 @@ from org_b.agent import (
     _registrable_domain,
     _leaks_identity,
     _normalize_indicator,
+    _row_fingerprint,
     _structured_output,
     extract_indicator,
     hunt_own_log,
+    load_watermark,
+    save_watermark,
 )
 
 # --- indicator normalization + hashing: WHY cross-org matching works ---------
@@ -313,3 +316,45 @@ def test_genuinely_different_domains_do_not_collide(different):
 def test_multi_part_suffixes_are_not_over_collapsed(host, expected):
     """Without the suffix list, evil.co.uk would collapse to the useless co.uk."""
     assert _registrable_domain(host) == expected
+
+
+# --- watermark: why a re-run doesn't count the same event twice --------------
+
+
+def test_fingerprint_is_stable_across_key_order():
+    a = {"timestamp": "2026-08-26T09:14:02Z", "detail": "x", "source_process": "p"}
+    b = {"detail": "x", "source_process": "p", "timestamp": "2026-08-26T09:14:02Z"}
+    assert _row_fingerprint(a) == _row_fingerprint(b)
+
+
+def test_fingerprint_differs_for_different_rows():
+    a = {"timestamp": "2026-08-26T09:14:02Z", "detail": "x"}
+    b = {"timestamp": "2026-08-26T09:14:02Z", "detail": "y"}
+    assert _row_fingerprint(a) != _row_fingerprint(b)
+
+
+def test_watermark_round_trips(tmp_path):
+    log = tmp_path / "mock_log.jsonl"
+    log.write_text("", encoding="utf-8")
+    assert load_watermark(log) == {}
+
+    seen = {"abc123": {"outcome": "sent", "technique": "T1059.001"}}
+    save_watermark(log, seen)
+    assert load_watermark(log) == seen
+
+
+def test_corrupt_watermark_means_reprocess_not_crash(tmp_path):
+    """A damaged watermark must degrade to 'triage everything again', never to
+    a failed run — losing time is recoverable, silently skipping rows is not."""
+    log = tmp_path / "mock_log.jsonl"
+    log.write_text("", encoding="utf-8")
+    (tmp_path / "mock_log.watermark.json").write_text("{not json", encoding="utf-8")
+    assert load_watermark(log) == {}
+
+
+def test_watermark_lives_beside_the_log_not_inside_it(tmp_path):
+    log = tmp_path / "mock_log.jsonl"
+    log.write_text('{"timestamp":"t","detail":"d"}\n', encoding="utf-8")
+    save_watermark(log, {"x": {"outcome": "noise"}})
+    assert log.read_text(encoding="utf-8") == '{"timestamp":"t","detail":"d"}\n'
+    assert (tmp_path / "mock_log.watermark.json").exists()

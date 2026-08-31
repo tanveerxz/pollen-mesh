@@ -10,3 +10,9 @@ dependencies = [
 
 [tool.uv]
 package = false
+
+[tool.pytest.ini_options]
+# `server/` is the project root and `server/server/` the package, so the tests
+# need the project root on the path to import it.
+pythonpath = ["."]
+testpaths = ["tests"]

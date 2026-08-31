@@ -9,7 +9,7 @@ actual Kimi response shape (reasoning item before message item, captured live
 
 import pytest
 
-from org_c.agent import (
+from pollen_mesh_agent.agent import (
     DEMO_CONSORTIUM_KEY,
     _TECHNIQUE_RE,
     _consortium_key,

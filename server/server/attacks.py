@@ -208,7 +208,13 @@ def ensure_working_log(org_id: str) -> None:
 
 
 def restore_logs(org_ids: list[str]) -> dict[str, bool]:
-    """Reset each org's working log to its committed pristine seed."""
+    """Reset each org's working log to its committed pristine seed.
+
+    Also drops that org's agent watermark. The watermark records which rows the
+    agent has already triaged; rewinding the log without clearing it would leave
+    the agent convinced it had already seen the restored rows, and it would
+    process nothing on the next run.
+    """
     restored: dict[str, bool] = {}
     for org_id in org_ids:
         seed = seed_path(org_id)
@@ -217,6 +223,8 @@ def restore_logs(org_ids: list[str]) -> dict[str, bool]:
             restored[org_id] = True
         else:
             restored[org_id] = False
+        watermark = log_path(org_id).with_name("mock_log.watermark.json")
+        watermark.unlink(missing_ok=True)
     return restored
 
 

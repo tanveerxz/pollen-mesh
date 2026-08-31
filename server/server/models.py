@@ -51,6 +51,9 @@ class MatchRecord(BaseModel):
 class SignatureSubmitResponse(BaseModel):
     signature_id: str
     match_id: str | None
+    # True when this submission matched one already stored for the same
+    # (org, indicator, window) and was folded into it rather than counted again.
+    duplicate: bool = False
 
 
 class LocalActionRequest(BaseModel):
