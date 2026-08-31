@@ -108,17 +108,27 @@ infrastructure as it realistically varies between two organisations:
 | Variant | Matches? |
 |---|---|
 | `secure-update-delivery.net` | yes |
-| `https://secure-update-delivery.net/` | yes (scheme and trailing punctuation normalised) |
-| `www.secure-update-delivery.net` | **no** |
-| `cdn.secure-update-delivery.net` | **no** |
+| `https://secure-update-delivery.net/` | yes — scheme, path, port and punctuation normalised |
+| `www.secure-update-delivery.net` | yes — collapsed to the registrable domain |
+| `cdn.secure-update-delivery.net` | yes |
+| `a.b.c.secure-update-delivery.net` | yes |
 | `secure-update-delivery.com` (TLD rotation) | **no** |
 | `secure-updates-delivery.net` (typosquat) | **no** |
+| `185.199.108.153` (resolved IP instead of a name) | **no** |
 
-So the claim "identifies related threats across companies" is true for **exactly shared
-infrastructure**, which is a real and common case — attackers reuse infrastructure — and
-false for most rotation. Subdomain collapsing (eTLD+1) is planned and fixes the first two
-rows. Rotation and typosquats need fuzzy matching, which is fundamentally incompatible
-with "equal hashes or nothing"; that is future work, not a solved problem.
+Indicators are collapsed to the **registrable domain** (eTLD+1) before hashing, so the
+same attacker host seen under different subdomains at different organisations still
+correlates. That is also the granularity threat intel is normally shared at. The
+multi-part suffix list (`co.uk`, `com.au`, …) is an approximation of the Public Suffix
+List — good enough for the common cases, and it deliberately avoids collapsing
+`evil.co.uk` to the useless `co.uk`. The full PSL would be more correct but needs a
+dependency that fetches at runtime.
+
+So "identifies related threats across companies" is true for **shared infrastructure,
+including subdomain variation**, and false for TLD rotation and typosquats: those are
+different registrations producing different values. Catching them needs fuzzy matching,
+which is fundamentally incompatible with "equal hashes or nothing" — that is future work
+(private fuzzy matching / PSI over n-grams), not a solved problem.
 
 The secondary rule — same technique within a padded time window — is deliberately weak
 and will produce false positives at volume. It exists so a match is still possible when

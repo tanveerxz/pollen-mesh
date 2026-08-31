@@ -14,6 +14,7 @@ from org_b.agent import (
     _TECHNIQUE_RE,
     _consortium_key,
     _hash_indicator,
+    _registrable_domain,
     _leaks_identity,
     _normalize_indicator,
     _structured_output,
@@ -91,7 +92,13 @@ def test_different_indicators_hash_differently():
 
 
 def test_normalize_strips_scheme_case_and_trailing_punctuation():
-    assert _normalize_indicator("HTTPS://Evil.Example.COM/.") == "evil.example.com"
+    """Scheme, case and trailing punctuation are stripped, and the host is then
+    collapsed to its registrable domain — so `evil.example.com` becomes
+    `example.com`. That collapsing is deliberate (see
+    test_subdomain_and_port_variants_still_correlate): attacker infrastructure
+    appears under different subdomains at different orgs, and matching the full
+    hostname missed it."""
+    assert _normalize_indicator("HTTPS://Evil.Example.COM/.") == "example.com"
 
 
 # --- deterministic indicator extraction (model never sees this job) ----------
@@ -259,3 +266,50 @@ def test_hunt_needs_the_same_key(monkeypatch):
     disclosed = _hash_indicator("secure-update-delivery.net")
     monkeypatch.setenv("POLLEN_CONSORTIUM_KEY", "consortium-two")
     assert hunt_own_log(_rows(), disclosed) == []
+
+
+# --- registrable-domain collapsing: subdomain rotation must still match -----
+
+
+@pytest.mark.parametrize(
+    "variant",
+    [
+        "secure-update-delivery.net",
+        "https://secure-update-delivery.net/",
+        "www.secure-update-delivery.net",
+        "cdn.secure-update-delivery.net",
+        "a.b.c.secure-update-delivery.net",
+        "secure-update-delivery.net:443",
+        "https://secure-update-delivery.net/beacon?id=1",
+    ],
+)
+def test_subdomain_and_port_variants_still_correlate(variant):
+    """Attacker infra shows up under different subdomains at different orgs.
+    Matching the registrable domain catches that; matching the full hostname
+    did not (a bare `www.` used to break the correlation)."""
+    assert _hash_indicator(variant) == _hash_indicator("secure-update-delivery.net")
+
+
+@pytest.mark.parametrize(
+    "different",
+    ["secure-update-delivery.com", "secure-updates-delivery.net", "delivery.net"],
+)
+def test_genuinely_different_domains_do_not_collide(different):
+    """Collapsing must not over-reach: TLD rotation and typosquats are different
+    registrations and are documented as NOT matched (docs/threat-model.md)."""
+    assert _hash_indicator(different) != _hash_indicator("secure-update-delivery.net")
+
+
+@pytest.mark.parametrize(
+    "host,expected",
+    [
+        ("evil.co.uk", "evil.co.uk"),
+        ("www.evil.co.uk", "evil.co.uk"),
+        ("shop.example.com.au", "example.com.au"),
+        ("example.com", "example.com"),
+        ("192.168.1.1", "192.168.1.1"),
+    ],
+)
+def test_multi_part_suffixes_are_not_over_collapsed(host, expected):
+    """Without the suffix list, evil.co.uk would collapse to the useless co.uk."""
+    assert _registrable_domain(host) == expected

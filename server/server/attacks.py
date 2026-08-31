@@ -250,11 +250,37 @@ def _consortium_key() -> bytes:
     return os.environ.get(CONSORTIUM_KEY_ENV, DEMO_CONSORTIUM_KEY).encode("utf-8")
 
 
+# Must stay identical to _MULTI_PART_SUFFIXES in the org agents.
+_MULTI_PART_SUFFIXES = {
+    "co.uk", "org.uk", "ac.uk", "gov.uk", "me.uk", "net.uk", "sch.uk",
+    "com.au", "net.au", "org.au", "edu.au", "gov.au",
+    "co.nz", "co.za", "co.jp", "or.jp", "ne.jp", "ac.jp",
+    "com.br", "com.cn", "com.mx", "com.tr", "com.sg", "com.hk",
+    "co.in", "co.kr", "co.il", "com.ar", "com.pl", "com.tw",
+}
+
+_IPV4_FULL_RE = re.compile(r"\d{1,3}(?:\.\d{1,3}){3}")
+
+
+def _registrable_domain(host: str) -> str:
+    """Identical to _registrable_domain in the org agents."""
+    if _IPV4_FULL_RE.fullmatch(host):
+        return host
+    labels = host.split(".")
+    if len(labels) < 3:
+        return host
+    if ".".join(labels[-2:]) in _MULTI_PART_SUFFIXES:
+        return ".".join(labels[-3:])
+    return ".".join(labels[-2:])
+
+
 def normalize_indicator(raw: str) -> str:
     """Identical to _normalize_indicator in the org agents."""
     value = raw.strip().lower()
     value = re.sub(r"^[a-z]+://", "", value)
-    return value.rstrip("/.")
+    value = value.split("/")[0].split(":")[0]
+    value = value.rstrip("/.")
+    return _registrable_domain(value)
 
 
 def hash_indicator(raw: str) -> str:

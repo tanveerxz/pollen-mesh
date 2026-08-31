@@ -209,10 +209,45 @@ def _consortium_key() -> bytes:
     return os.environ.get(CONSORTIUM_KEY_ENV, DEMO_CONSORTIUM_KEY).encode("utf-8")
 
 
+# Suffixes where the registrable name is the THIRD label from the right, not the
+# second. Without these, "example.co.uk" would collapse to the useless "co.uk".
+# An approximation of the Public Suffix List covering the common cases; the full
+# PSL would be more correct but needs a dependency that fetches at runtime.
+_MULTI_PART_SUFFIXES = {
+    "co.uk", "org.uk", "ac.uk", "gov.uk", "me.uk", "net.uk", "sch.uk",
+    "com.au", "net.au", "org.au", "edu.au", "gov.au",
+    "co.nz", "co.za", "co.jp", "or.jp", "ne.jp", "ac.jp",
+    "com.br", "com.cn", "com.mx", "com.tr", "com.sg", "com.hk",
+    "co.in", "co.kr", "co.il", "com.ar", "com.pl", "com.tw",
+}
+
+
+def _registrable_domain(host: str) -> str:
+    """Collapse a hostname to the domain someone actually registered.
+
+    Attacker infrastructure appears at different orgs under different
+    subdomains — one sees `www.evil.net`, another `cdn.evil.net`. Matching the
+    full hostname misses that; matching the registrable domain catches it,
+    which is also the granularity threat intel is normally shared at.
+
+    Left alone if it is an IP address or already a bare name.
+    """
+    if _IPV4_RE.fullmatch(host):
+        return host
+    labels = host.split(".")
+    if len(labels) < 3:
+        return host
+    if ".".join(labels[-2:]) in _MULTI_PART_SUFFIXES:
+        return ".".join(labels[-3:])
+    return ".".join(labels[-2:])
+
+
 def _normalize_indicator(raw: str) -> str:
     value = raw.strip().lower()
     value = re.sub(r"^[a-z]+://", "", value)
-    return value.rstrip("/.")
+    value = value.split("/")[0].split(":")[0]  # drop any path or port
+    value = value.rstrip("/.")
+    return _registrable_domain(value)
 
 
 def _hash_indicator(raw: str) -> str:
