@@ -24,6 +24,8 @@ import requests
 from flwr.agentapp import AgentApp, AgentSession
 from flwr.app import Context
 
+from . import sources
+
 app = AgentApp()
 
 # Model output can contain characters the Windows console codepage can't encode;
@@ -47,6 +49,34 @@ _TECHNIQUE_RE = re.compile(r"^T\d{4}(?:\.\d{3})?$")
 _DOMAIN_RE = re.compile(
     r"\b((?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,})\b", re.IGNORECASE
 )
+# A URL is unambiguous, so it is looked for first and wins outright.
+_URL_RE = re.compile(
+    r"\b[a-z][a-z0-9+.-]*://((?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,})",
+    re.IGNORECASE,
+)
+
+# Real telemetry is full of dotted tokens that are not domains: file names
+# (`install.py`), object paths (`TimeCreated.ToUniversalTime`), namespaced
+# identifiers. Hashing one of those produces an indicator no other org can ever
+# match, and — worse — two orgs running the same tooling could match on it and
+# manufacture a correlation out of nothing. So a bare dotted token is only
+# treated as a domain if its last label is an actual TLD.
+_KNOWN_TLDS = {
+    # generic
+    "com", "net", "org", "info", "biz", "name", "pro", "mobi", "asia", "int",
+    "edu", "gov", "mil", "app", "dev", "cloud", "tech", "online", "site",
+    "store", "shop", "live", "space", "website", "click", "link", "work",
+    "fun", "top", "xyz", "icu", "cyou", "monster", "buzz", "digital", "email",
+    "agency", "systems", "solutions", "services", "network", "host", "press",
+    "one", "world", "life", "today", "team", "group", "center", "company",
+    # country codes seen in threat intel
+    "io", "ai", "co", "me", "tv", "cc", "ws", "su", "ru", "cn", "uk", "de",
+    "fr", "it", "es", "nl", "se", "no", "fi", "dk", "pl", "cz", "ro", "gr",
+    "pt", "hu", "ch", "at", "be", "ie", "il", "ae", "sa", "tr", "ua", "us",
+    "ca", "au", "nz", "jp", "kr", "sg", "hk", "tw", "in", "id", "th", "vn",
+    "ph", "my", "br", "mx", "ar", "cl", "za", "ng", "ke", "eu", "tk", "ml",
+    "ga", "cf", "gq", "pw", "sh", "st", "to", "vc", "gg", "im",
+}
 
 # Ordinary corporate destinations. Never a shareable indicator, so the agent has
 # to actually discriminate rather than hash the first domain it sees.
@@ -189,12 +219,32 @@ def extract_indicator(row: dict[str, str]) -> str | None:
     no safety filter can refuse it.
     """
     detail = row.get("detail") or ""
+
+    # A URL says outright that the token is a network destination.
+    for match in _URL_RE.finditer(detail):
+        candidate = match.group(1).lower().rstrip(".")
+        if not _is_benign(candidate):
+            return candidate
+
     for match in _DOMAIN_RE.finditer(detail):
         candidate = match.group(1).lower().rstrip(".")
-        if candidate in BENIGN_DOMAINS or candidate.endswith(".exe"):
+        if _is_benign(candidate):
+            continue
+        # Reject anything sitting inside a filesystem path: `C:\tools\build.py`
+        # is a file, not infrastructure.
+        if match.start() > 0 and detail[match.start() - 1] in "\\/":
+            continue
+        if candidate.rsplit(".", 1)[-1] not in _KNOWN_TLDS:
             continue
         return candidate
     return None
+
+
+def _is_benign(candidate: str) -> bool:
+    if candidate in BENIGN_DOMAINS:
+        return True
+    # Also cover subdomains of a benign registrable domain.
+    return _registrable_domain(candidate) in BENIGN_DOMAINS
 
 
 def _consortium_key() -> bytes:
@@ -344,26 +394,64 @@ def save_watermark(log_path: Path, seen: dict[str, dict[str, str]]) -> None:
         print(f"[watermark] could not persist: {exc}")
 
 
+def _parse_event_ids(raw: str) -> list[int]:
+    return [int(part) for part in re.split(r"[,\s]+", raw.strip()) if part.isdigit()]
+
+
+def _resolve_source(context: Context) -> tuple[str, Path, Path]:
+    """Return (source spec, base dir, watermark anchor).
+
+    `agent.log_source` is the general form (`jsonl:`, `file:`, `winevent:`).
+    `agent.log_path` remains as it was so existing configs keep working — it is
+    just the jsonl case spelled out.
+    """
+    base_dir = Path(__file__).resolve().parent.parent
+    spec = str(context.run_config.get("agent.log_source", "")).strip()
+    if not spec:
+        spec = f"jsonl:{context.run_config['agent.log_path']}"
+
+    kind, argument = sources.parse_spec(spec)
+    if kind == "winevent":
+        # Live channel — nothing on disk to sit beside, so the watermark is
+        # keyed by channel name under the project's own data directory.
+        safe = re.sub(r"[^A-Za-z0-9]+", "_", argument).strip("_").lower()
+        anchor = base_dir / "data" / f"winevent_{safe}.jsonl"
+        anchor.parent.mkdir(parents=True, exist_ok=True)
+        return spec, base_dir, anchor
+
+    path = Path(argument)
+    if not path.is_absolute():
+        path = base_dir / path
+    return spec, base_dir, path
+
+
 @app.main()
 def main(agent: AgentSession, context: Context) -> None:
     org_id = str(context.run_config["agent.org_id"])
-    log_path = Path(str(context.run_config["agent.log_path"]))
     server_url = str(context.run_config["agent.server_url"])
     model = str(context.run_config.get("agent.model", "/models/Kimi-K2.7-Code"))
 
-    if not log_path.is_absolute():
-        log_path = Path(__file__).resolve().parent.parent / log_path
+    spec, base_dir, log_path = _resolve_source(context)
+    kind, _argument = sources.parse_spec(spec)
 
     # The working log is gitignored (attacks mutate it); regenerate it from the
     # committed seed if it's absent — e.g. on a fresh clone or FAB build.
-    if not log_path.exists():
+    if kind != "winevent" and not log_path.exists():
         seed = log_path.with_name(log_path.stem + ".seed" + log_path.suffix)
         if seed.exists():
             log_path.parent.mkdir(parents=True, exist_ok=True)
             log_path.write_text(seed.read_text(encoding="utf-8"), encoding="utf-8")
 
-    with log_path.open(encoding="utf-8") as f:
-        rows = [json.loads(line) for line in f if line.strip()]
+    event_ids = _parse_event_ids(str(context.run_config.get("agent.log_event_ids", "")))
+    max_events = int(context.run_config.get("agent.log_max_events", sources.WINEVENT_MAX_EVENTS))
+
+    try:
+        rows = sources.load_rows(
+            spec, base_dir=base_dir, event_ids=event_ids, max_events=max_events
+        )
+    except Exception as exc:  # noqa: BLE001 - an unreadable source is a config error
+        print(f"[{org_id}] cannot read log source {spec!r}: {exc}")
+        return
 
     # Hunt mode: no model calls, no submission — just answer "was I hit too?"
     # against our own log, using a hash someone else disclosed.
@@ -380,12 +468,34 @@ def main(agent: AgentSession, context: Context) -> None:
         print(f"[{org_id}] hunt complete — {len(hits)} matching event(s) in our own history")
         return
 
+    # Preflight: prove the model is reachable before working through the log.
+    # Without this, an unreachable endpoint fails every row independently — each
+    # retrying three times behind a 180s connect timeout — so a dead endpoint
+    # looks like a slow run for several minutes before admitting anything is
+    # wrong. That happened live on 2026-08-31, when the shared endpoints the
+    # demo was configured against were withdrawn after the event.
+    try:
+        _ask(
+            agent, model, TRIAGE_INSTRUCTIONS, TRIAGE_SCHEMA, "triage",
+            {"detail": "preflight: routine outbound TCP 443 to slack.com"},
+        )
+    except Exception as exc:  # noqa: BLE001
+        print(
+            f"[{org_id}] model {model!r} is not reachable — aborting before "
+            f"reading any rows.\n"
+            f"[{org_id}] check FLWR_MODEL_API_ENDPOINT / FLWR_MODEL_API_KEY, and "
+            f"remember the local SuperLink keeps the environment it started with "
+            f"(kill flower-superlink to pick up new values).\n"
+            f"[{org_id}] {exc}"
+        )
+        return
+
     rescan = str(context.run_config.get("agent.rescan", "")).lower() in {"1", "true", "yes"}
     seen = {} if rescan else load_watermark(log_path)
     new_rows = [(i, r) for i, r in enumerate(rows) if _row_fingerprint(r) not in seen]
 
     print(
-        f"[{org_id}] {len(rows)} rows from {log_path.name} | model={model} | "
+        f"[{org_id}] {len(rows)} rows from {spec} | model={model} | "
         f"{len(new_rows)} new, {len(rows) - len(new_rows)} already triaged"
     )
     sent = 0

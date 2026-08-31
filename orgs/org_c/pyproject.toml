@@ -16,5 +16,15 @@ agentapp = "org_c.agent:app"
 [tool.flwr.app.config.agent]
 org_id = "org_c"
 log_path = "data/mock_log.jsonl"
+# Where that log comes from. Blank means "use log_path as JSONL". Forms:
+#   jsonl:<path>              one JSON object per line
+#   file:<path>               plain text, one event per line
+#   winevent:<channel>        the live Windows Event Log
+# e.g. log_source = "winevent:Windows PowerShell"
+log_source = ""
+# For winevent only: which event ids to read, and how many. 400/403 carry the
+# full command line on any stock Windows host, with no logging policy enabled.
+log_event_ids = "400,403,4104"
+log_max_events = 40
 server_url = "http://localhost:8000/api/signatures"
 model = "/models/Kimi-K2.7-Code"

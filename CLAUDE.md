@@ -274,3 +274,69 @@ Adjust freely — this is a starting split, not a hard assignment. Original four
 - **Safety and oversight** — whether the project is transparent, reliable, and appropriately supervised.
 
 This project's whole premise maps directly onto "Safety and oversight" (the two human-approval gates are the mechanism, not decoration) and "Impact" (a real, researched cross-org information-sharing problem — see the separate rationale doc). Make sure the 3–5 minute demo actually says this rather than leaving judges to connect the dots themselves.
+
+---
+
+## 0d. The shared model endpoints are gone (verified 2026-08-31)
+
+All four Track 2 endpoints in the §0b table are **dead** — every one returns no
+response at all:
+
+```
+129.212.182.232:8001  Qwen3.5-397B     HTTP 000
+134.199.193.245:8001  Kimi-K2.7-Code   HTTP 000
+129.212.179.194:8001  GLM-5.2          HTTP 000
+165.245.135.52:8001   MiniMax-M3       HTTP 000
+```
+
+They were provisioned for the event and withdrawn after it. Anything in this
+file that says "Kimi needs no key, just point at that IP" is now historical.
+**A live demo needs a model route decided before it starts**, and the stored
+`supergrid.flower.ai` credential has expired (`flwr federation list supergrid`
+returns "Authentication failed"), so `flwr login` has to be re-run first.
+
+Two consequences already handled in code:
+
+- **The agent preflights the model** before reading any rows. Previously a dead
+  endpoint failed each row independently, three retries deep behind a 180-second
+  connect timeout — a nine-minute run that produced nothing and never said why.
+  It now aborts in one call with a message naming the environment variables and
+  the SuperLink's env-caching behaviour.
+- **The first `flwr run` after a reboot can time out** with "Failed to start
+  local SuperLink within 15s". It is a cold-start timeout, not a real failure —
+  the immediate retry succeeded. Warm the SuperLink up once before demoing.
+
+## 0e. Real log ingestion (2026-08-31)
+
+The agent no longer only reads mock JSONL. `agent.log_source` takes
+`jsonl:<path>`, `file:<path>`, or `winevent:<channel>`, the last reading the
+live Windows Event Log via `Get-WinEvent`.
+
+What makes `winevent` work on a stock machine, verified here:
+
+- The classic **`Windows PowerShell`** channel (events 400/403) records the full
+  command line as `HostApplication=`, is enabled by default, and is readable
+  **without admin**. Script-block logging (4104) needs a policy that is not set
+  on this machine, so it is not depended on.
+- Command lines are `-EncodedCommand` base64. `sources.decode_encoded_commands`
+  expands them in place before anything reads the text — an indicator hidden in
+  base64 would otherwise never correlate with the same indicator seen in the
+  clear at another org.
+- Local identity is redacted before triage sends the line to a model.
+
+Verified end to end on 2026-08-31: a benign encoded PowerShell command run on
+this laptop appeared in the real Event Log seconds later, was decoded, and
+hashed to `12f23ed9d97811dd` — the same value the three demo orgs produce, so a
+real machine correlates with the demo mesh.
+
+Two bugs the first real-log run exposed, both fixed and regression-tested:
+
+1. **Redaction ate the evidence.** An unanchored `DOMAIN\user` rule turned
+   `...\v1.0\powershell.exe` into `...\v1.<domain>\<user>`, destroying the only
+   part of the line worth triaging. Every redaction rule is now anchored to an
+   explicit context.
+2. **`TimeCreated.ToUniversalTime` was extracted as an indicator.** Real logs
+   are full of dotted tokens that are not domains. A bare token is now only
+   treated as one if its last label is a real TLD and it is not inside a
+   filesystem path; URLs are matched first and win outright. Two orgs running
+   the same tooling could otherwise have "correlated" on a shared library name.

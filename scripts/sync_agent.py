@@ -21,8 +21,14 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-CANONICAL = ROOT / "pollen-mesh-agent" / "pollen_mesh_agent" / "agent.py"
-CANONICAL_TESTS = ROOT / "pollen-mesh-agent" / "tests" / "test_agent.py"
+CANONICAL_PKG = ROOT / "pollen-mesh-agent" / "pollen_mesh_agent"
+CANONICAL = CANONICAL_PKG / "agent.py"
+CANONICAL_TESTS_DIR = ROOT / "pollen-mesh-agent" / "tests"
+CANONICAL_TESTS = CANONICAL_TESTS_DIR / "test_agent.py"
+CANONICAL_TEST_FILES = ("test_agent.py", "test_sources.py")
+# Every module the agent package ships. agent.py imports these relatively
+# (`from . import sources`), so they need no rewriting per org.
+CANONICAL_MODULES = ("agent.py", "sources.py")
 ORGS = ("org_a", "org_b", "org_c")
 
 
@@ -38,19 +44,20 @@ def _rendered(source: Path, org: str) -> str:
     than maintained as three near-duplicate files.
     """
     text = source.read_text(encoding="utf-8")
-    if source == CANONICAL_TESTS:
-        text = text.replace("from pollen_mesh_agent.agent import", f"from {org}.agent import")
+    if source.parent == CANONICAL_TESTS_DIR:
+        text = text.replace("from pollen_mesh_agent.", f"from {org}.")
     return text
 
 
 def targets() -> list[tuple[Path, Path, str]]:
     pairs: list[tuple[Path, Path, str]] = []
     for org in ORGS:
-        pairs.append((CANONICAL, ROOT / "orgs" / org / org / "agent.py", org))
-        if CANONICAL_TESTS.exists():
-            pairs.append(
-                (CANONICAL_TESTS, ROOT / "orgs" / org / "tests" / "test_agent.py", org)
-            )
+        for module in CANONICAL_MODULES:
+            pairs.append((CANONICAL_PKG / module, ROOT / "orgs" / org / org / module, org))
+        for test_file in CANONICAL_TEST_FILES:
+            source = CANONICAL_TESTS_DIR / test_file
+            if source.exists():
+                pairs.append((source, ROOT / "orgs" / org / "tests" / test_file, org))
     return pairs
 
 

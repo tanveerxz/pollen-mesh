@@ -358,3 +358,43 @@ def test_watermark_lives_beside_the_log_not_inside_it(tmp_path):
     save_watermark(log, {"x": {"outcome": "noise"}})
     assert log.read_text(encoding="utf-8") == '{"timestamp":"t","detail":"d"}\n'
     assert (tmp_path / "mock_log.watermark.json").exists()
+
+
+# --- false indicators: real logs are full of dotted tokens that are not domains
+
+
+@pytest.mark.parametrize(
+    "detail",
+    [
+        "Get-WinEvent | Select TimeCreated.ToUniversalTime",
+        "System.Management.Automation.PSCustomObject created",
+        "loaded module Newtonsoft.Json",
+        r"running C:\ProgramData\tools\install.py",
+        "wrote /var/tmp/payload.sh",
+    ],
+)
+def test_dotted_tokens_that_are_not_domains_are_rejected(detail):
+    """Hashing one of these produces an indicator no other org can match — or,
+    worse, one that two orgs running the same tooling would both produce,
+    inventing a correlation out of shared software rather than a shared
+    attacker. Found on the first run against a real Windows Event Log, where
+    `TimeCreated.ToUniversalTime` was extracted as the indicator."""
+    assert extract_indicator({"detail": detail}) is None
+
+
+def test_a_url_wins_over_a_bare_dotted_token():
+    detail = "Newtonsoft.Json loaded; then GET https://secure-update-delivery.net/beacon"
+    assert extract_indicator({"detail": detail}) == "secure-update-delivery.net"
+
+
+def test_a_domain_inside_a_filesystem_path_is_not_an_indicator():
+    assert extract_indicator({"detail": r"C:\builds\vendor.io\out.dll"}) is None
+
+
+def test_a_benign_subdomain_is_still_benign():
+    assert extract_indicator({"detail": "outbound TCP 443 to fs.microsoft.com"}) is None
+
+
+@pytest.mark.parametrize("host", ["evil-c2.xyz", "beacon.top", "payload.icu", "drop.su"])
+def test_unusual_but_real_tlds_are_accepted(host):
+    assert extract_indicator({"detail": f"GET http://{host}/x"}) == host
