@@ -207,13 +207,28 @@ def ensure_working_log(org_id: str) -> None:
         shutil.copyfile(src, dst)
 
 
+def watermark_path(org_id: str) -> Path:
+    """Where that org's agent keeps its watermark.
+
+    Must stay byte-identical to `_watermark_path` in the agent. It deliberately
+    does NOT live beside the log: `flwr run` installs the app under
+    ~/.flwr/apps/<app>.<content-hash>/ with the log bundled in, so a path
+    relative to the app moves whenever the log changes.
+    """
+    root = os.environ.get("POLLEN_STATE_DIR")
+    base = Path(root) if root else Path.home() / ".pollen-mesh"
+    stem = log_path(org_id).stem
+    slug = re.sub(r"[^A-Za-z0-9]+", "_", f"{org_id}_{stem}").strip("_").lower()
+    return base / f"{slug or 'agent'}.watermark.json"
+
+
 def restore_logs(org_ids: list[str]) -> dict[str, bool]:
     """Reset each org's working log to its committed pristine seed.
 
     Also drops that org's agent watermark. The watermark records which rows the
     agent has already triaged; rewinding the log without clearing it would leave
-    the agent convinced it had already seen the restored rows, and it would
-    process nothing on the next run.
+    the agent convinced it had already seen the restored rows, so it would
+    process nothing on the next run — a silent no-op mid-demo.
     """
     restored: dict[str, bool] = {}
     for org_id in org_ids:
@@ -223,8 +238,7 @@ def restore_logs(org_ids: list[str]) -> dict[str, bool]:
             restored[org_id] = True
         else:
             restored[org_id] = False
-        watermark = log_path(org_id).with_name("mock_log.watermark.json")
-        watermark.unlink(missing_ok=True)
+        watermark_path(org_id).unlink(missing_ok=True)
     return restored
 
 
