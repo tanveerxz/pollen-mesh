@@ -457,12 +457,29 @@ def _row_fingerprint(row: dict[str, str]) -> str:
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:16]
 
 
-def _watermark_path(log_path: Path) -> Path:
-    return log_path.with_name(log_path.stem + ".watermark.json")
+WATERMARK_DIR_ENV = "POLLEN_STATE_DIR"
 
 
-def load_watermark(log_path: Path) -> dict[str, dict[str, str]]:
-    path = _watermark_path(log_path)
+def _watermark_path(log_path: Path, org_id: str = "") -> Path:
+    """Where this org's watermark lives.
+
+    Deliberately NOT beside the log. `flwr run` installs the app under
+    ~/.flwr/apps/<app>.<content-hash>/, and the log is bundled into the FAB — so
+    a path relative to the app moves the moment the log gains a row, and the
+    watermark is lost exactly when it is most needed. It is per-org runtime
+    state, not app content, so it belongs outside the bundle entirely.
+
+    Keyed by org and source so two orgs on one machine, or one org reading two
+    sources, never share a watermark.
+    """
+    root = os.environ.get(WATERMARK_DIR_ENV)
+    base = Path(root) if root else Path.home() / ".pollen-mesh"
+    slug = re.sub(r"[^A-Za-z0-9]+", "_", f"{org_id}_{log_path.stem}").strip("_").lower()
+    return base / f"{slug or 'agent'}.watermark.json"
+
+
+def load_watermark(log_path: Path, org_id: str = "") -> dict[str, dict[str, str]]:
+    path = _watermark_path(log_path, org_id)
     if not path.exists():
         return {}
     try:
@@ -473,9 +490,12 @@ def load_watermark(log_path: Path) -> dict[str, dict[str, str]]:
     return seen if isinstance(seen, dict) else {}
 
 
-def save_watermark(log_path: Path, seen: dict[str, dict[str, str]]) -> None:
-    path = _watermark_path(log_path)
+def save_watermark(
+    log_path: Path, seen: dict[str, dict[str, str]], org_id: str = ""
+) -> None:
+    path = _watermark_path(log_path, org_id)
     try:
+        path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(
             json.dumps({"version": 1, "seen": seen}, indent=2), encoding="utf-8"
         )
@@ -580,7 +600,7 @@ def main(agent: AgentSession, context: Context) -> None:
         return
 
     rescan = str(context.run_config.get("agent.rescan", "")).lower() in {"1", "true", "yes"}
-    seen = {} if rescan else load_watermark(log_path)
+    seen = {} if rescan else load_watermark(log_path, org_id)
     new_rows = [(i, r) for i, r in enumerate(rows) if _row_fingerprint(r) not in seen]
 
     print(
@@ -601,7 +621,7 @@ def main(agent: AgentSession, context: Context) -> None:
 
         def remember(outcome: str, **extra: str) -> None:
             seen[fingerprint] = {"outcome": outcome, **extra}
-            save_watermark(log_path, seen)
+            save_watermark(log_path, seen, org_id)
 
         try:
             escalate, reason = _triage(agent, model, row)

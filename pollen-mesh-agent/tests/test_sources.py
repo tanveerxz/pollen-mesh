@@ -72,8 +72,8 @@ def test_a_line_with_no_encoded_command_is_unchanged():
 
 
 def test_user_paths_are_redacted():
-    line = r"C:\Users\kappo\Desktop\report.docx opened"
-    assert "kappo" not in redact_local_identity(line)
+    line = r"C:\Users\j.doe\Desktop\report.docx opened"
+    assert "j.doe" not in redact_local_identity(line)
     assert r"C:\Users\<user>" in redact_local_identity(line)
 
 
@@ -91,16 +91,16 @@ def test_redaction_does_not_eat_ordinary_paths():
 
 
 def test_named_identity_fields_are_redacted():
-    line = "SubjectUserName=kappo ComputerName=DESKTOP-7H2K1 LogonType=3"
+    line = "SubjectUserName=j.doe ComputerName=WS-4471 LogonType=3"
     redacted = redact_local_identity(line)
-    assert "kappo" not in redacted
-    assert "DESKTOP-7H2K1" not in redacted
+    assert "j.doe" not in redacted
+    assert "WS-4471" not in redacted
     assert "LogonType=3" in redacted, "non-identifying fields must survive"
 
 
 def test_redaction_keeps_the_indicator_intact():
     """Redaction must not destroy the thing correlation depends on."""
-    line = r"C:\Users\kappo\tool.exe -> https://secure-update-delivery.net/beacon"
+    line = r"C:\Users\j.doe\tool.exe -> https://secure-update-delivery.net/beacon"
     redacted = redact_local_identity(line)
     assert extract_indicator({"detail": redacted}) == "secure-update-delivery.net"
 

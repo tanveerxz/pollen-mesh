@@ -19,6 +19,7 @@ from org_a.agent import (
     _leaks_identity,
     _normalize_indicator,
     _row_fingerprint,
+    _watermark_path,
     _structured_output,
     extract_indicator,
     hunt_own_log,
@@ -334,31 +335,65 @@ def test_fingerprint_differs_for_different_rows():
     assert _row_fingerprint(a) != _row_fingerprint(b)
 
 
-def test_watermark_round_trips(tmp_path):
+def test_watermark_round_trips(tmp_path, monkeypatch):
+    monkeypatch.setenv("POLLEN_STATE_DIR", str(tmp_path / "state"))
     log = tmp_path / "mock_log.jsonl"
     log.write_text("", encoding="utf-8")
-    assert load_watermark(log) == {}
+    assert load_watermark(log, "org_a") == {}
 
     seen = {"abc123": {"outcome": "sent", "technique": "T1059.001"}}
-    save_watermark(log, seen)
-    assert load_watermark(log) == seen
+    save_watermark(log, seen, "org_a")
+    assert load_watermark(log, "org_a") == seen
 
 
-def test_corrupt_watermark_means_reprocess_not_crash(tmp_path):
+def test_corrupt_watermark_means_reprocess_not_crash(tmp_path, monkeypatch):
     """A damaged watermark must degrade to 'triage everything again', never to
     a failed run — losing time is recoverable, silently skipping rows is not."""
+    state = tmp_path / "state"
+    monkeypatch.setenv("POLLEN_STATE_DIR", str(state))
     log = tmp_path / "mock_log.jsonl"
     log.write_text("", encoding="utf-8")
-    (tmp_path / "mock_log.watermark.json").write_text("{not json", encoding="utf-8")
-    assert load_watermark(log) == {}
+    save_watermark(log, {"x": {"outcome": "sent"}}, "org_a")
+    _watermark_path(log, "org_a").write_text("{not json", encoding="utf-8")
+    assert load_watermark(log, "org_a") == {}
 
 
-def test_watermark_lives_beside_the_log_not_inside_it(tmp_path):
-    log = tmp_path / "mock_log.jsonl"
+def test_watermark_never_touches_the_log(tmp_path, monkeypatch):
+    monkeypatch.setenv("POLLEN_STATE_DIR", str(tmp_path / "state"))
+    log_dir = tmp_path / "data"
+    log_dir.mkdir()
+    log = log_dir / "mock_log.jsonl"
     log.write_text('{"timestamp":"t","detail":"d"}\n', encoding="utf-8")
-    save_watermark(log, {"x": {"outcome": "noise"}})
+    save_watermark(log, {"x": {"outcome": "noise"}}, "org_a")
     assert log.read_text(encoding="utf-8") == '{"timestamp":"t","detail":"d"}\n'
-    assert (tmp_path / "mock_log.watermark.json").exists()
+    assert list(log.parent.iterdir()) == [log], "nothing written next to the log"
+
+
+def test_watermark_lives_outside_the_app_bundle(tmp_path, monkeypatch):
+    """Regression: the watermark used to sit beside the log. `flwr run` installs
+    the app under ~/.flwr/apps/<app>.<content-hash>/ WITH the log bundled in, so
+    appending one row changed the hash, moved the directory, and lost the
+    watermark — exactly when a re-run most needed it."""
+    monkeypatch.setenv("POLLEN_STATE_DIR", str(tmp_path / "state"))
+    bundle_v1 = tmp_path / "apps" / "app.aaaa" / "data"
+    bundle_v2 = tmp_path / "apps" / "app.bbbb" / "data"
+    for d in (bundle_v1, bundle_v2):
+        d.mkdir(parents=True)
+        (d / "mock_log.jsonl").write_text("", encoding="utf-8")
+
+    save_watermark(bundle_v1 / "mock_log.jsonl", {"row1": {"outcome": "sent"}}, "org_a")
+    # Same org, same source, app rebuilt at a different path: still remembered.
+    assert load_watermark(bundle_v2 / "mock_log.jsonl", "org_a") == {
+        "row1": {"outcome": "sent"}
+    }
+
+
+def test_two_orgs_on_one_machine_do_not_share_a_watermark(tmp_path, monkeypatch):
+    monkeypatch.setenv("POLLEN_STATE_DIR", str(tmp_path / "state"))
+    log = tmp_path / "mock_log.jsonl"
+    log.write_text("", encoding="utf-8")
+    save_watermark(log, {"row1": {"outcome": "sent"}}, "org_a")
+    assert load_watermark(log, "org_b") == {}
 
 
 # --- false indicators: real logs are full of dotted tokens that are not domains
