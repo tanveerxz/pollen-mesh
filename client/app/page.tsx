@@ -31,7 +31,8 @@ import { Act, ActChip, type ActState } from "@/components/story";
 import { AgentLive } from "@/components/agent-live";
 
 export default function Home() {
-  const { link, signatures, matches, orgStatuses, refresh, demoMode } = useSystem();
+  const { link, signatures, matches, orgStatuses, refresh, demoMode, orgIds } =
+    useSystem();
   const { markSimulated, reset, busy: demoBusy } = useDemo();
 
   const [scenarios, setScenarios] = useState<AttackScenario[]>([]);
@@ -49,7 +50,7 @@ export default function Home() {
 
   const loadLogs = useCallback(async () => {
     const entries = await Promise.all(
-      ORG_IDS.map(async (id) => {
+      orgIds.map(async (id) => {
         try {
           return [id, await getOrgLog(id)] as const;
         } catch {
@@ -58,7 +59,7 @@ export default function Home() {
       }),
     );
     setLogs(Object.fromEntries(entries));
-  }, []);
+  }, [orgIds]);
 
   useEffect(() => {
     void loadLogs();
@@ -214,12 +215,12 @@ export default function Home() {
               state={stateOf(0)}
               waiting="connecting"
               active="connecting"
-              done={`${ORG_IDS.length} nodes online`}
+              done={`${orgIds.length} nodes online`}
             />
           }
         >
           <div className="grid gap-2.5 sm:grid-cols-3">
-            {ORG_IDS.map((id) => (
+            {orgIds.map((id) => (
               <Link
                 key={id}
                 href={`/org/${id}`}
@@ -487,7 +488,7 @@ export default function Home() {
             </div>
           ) : hasSignatures ? (
             <div className="grid gap-2.5 sm:grid-cols-3">
-              {ORG_IDS.map((id) => {
+              {orgIds.map((id) => {
                 const mine = signatures.filter((s) => s.org_id === id);
                 const held = logs[id]?.length ?? 0;
                 return (

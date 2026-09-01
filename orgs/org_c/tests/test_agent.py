@@ -13,6 +13,7 @@ from org_c.agent import (
     DEMO_CONSORTIUM_KEY,
     _TECHNIQUE_RE,
     _consortium_key,
+    _loads_lenient,
     _hash_indicator,
     _registrable_domain,
     _leaks_identity,
@@ -398,3 +399,61 @@ def test_a_benign_subdomain_is_still_benign():
 @pytest.mark.parametrize("host", ["evil-c2.xyz", "beacon.top", "payload.icu", "drop.su"])
 def test_unusual_but_real_tlds_are_accepted(host):
     assert extract_indicator({"detail": f"GET http://{host}/x"}) == host
+
+
+# --- lenient parsing: not every endpoint honours text.format ------------------
+
+
+def test_prose_wrapped_json_is_recovered():
+    """Venice accepts a json_schema request and returns prose anyway (measured
+    across five models). The schema is also stated in the prompt, and the reply
+    parsed leniently, so the agent is not restricted to strict providers."""
+    reply = (
+        "Here is my assessment:\n\n"
+        '{"reason": "Office spawning encoded PowerShell.", "escalate": true}\n\n'
+        "Let me know if you need more detail."
+    )
+    assert _loads_lenient(reply) == {
+        "reason": "Office spawning encoded PowerShell.",
+        "escalate": True,
+    }
+
+
+def test_fenced_json_block_is_recovered():
+    reply = 'Assessment:\n```json\n{"reason": "beaconing", "escalate": true}\n```\n'
+    assert _loads_lenient(reply)["escalate"] is True
+
+
+def test_nested_braces_do_not_truncate_the_object():
+    reply = '{"reason": "saw {nested} braces", "escalate": false, "meta": {"a": 1}}'
+    assert _loads_lenient(reply)["meta"] == {"a": 1}
+
+
+def test_braces_inside_strings_do_not_confuse_the_parser():
+    reply = 'text {"reason": "matched \\"}\\" literally", "escalate": true} end'
+    assert _loads_lenient(reply)["escalate"] is True
+
+
+def test_a_reply_with_no_json_is_an_error_not_a_guess():
+    with pytest.raises(ValueError):
+        _loads_lenient("I cannot help with that request.")
+
+
+def test_empty_message_content_falls_through_to_an_error():
+    """Venice with a schema returned an empty message and spent the whole budget
+    on reasoning. That must raise so the retry loop sees it, not return {}."""
+    response = {
+        "output": [
+            {"type": "reasoning", "content": [{"type": "reasoning_text", "text": "..."}]},
+            {"type": "message", "content": [{"type": "output_text", "text": "   "}]},
+        ]
+    }
+    with pytest.raises(ValueError):
+        _structured_output(response)
+
+
+def test_strict_json_still_takes_the_fast_path():
+    assert _loads_lenient('{"escalate": true, "reason": "x"}') == {
+        "escalate": True,
+        "reason": "x",
+    }

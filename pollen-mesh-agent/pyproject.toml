@@ -39,5 +39,7 @@ log_event_ids = "400,403,4104"
 log_max_events = 40
 # Where stripped signatures are submitted. Point this at your own correlator.
 server_url = "http://localhost:8000/api/signatures"
-# Any Open-Responses-compatible model reachable from the SuperLink.
-model = "/models/Kimi-K2.7-Code"
+# Any Open-Responses-compatible model reachable from the SuperLink. The value is
+# whatever the configured endpoint calls the model — for OpenRouter (see the
+# README) that is a slug like "moonshotai/kimi-k2.7-code".
+model = "zai-org-glm-5-2"

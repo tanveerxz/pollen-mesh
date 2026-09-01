@@ -65,6 +65,7 @@ export function SystemProvider({ children }: { children: ReactNode }) {
   const [arrivals, setArrivals] = useState<SignatureRecord[]>([]);
 
   const seenSignatureIds = useRef<Set<string>>(new Set());
+  const lastOrgIds = useRef<string[]>([]);
   const primed = useRef(false);
   const tickRef = useRef<() => void>(() => {});
 
@@ -142,11 +143,36 @@ export function SystemProvider({ children }: { children: ReactNode }) {
 
   const value = useMemo<SystemState>(() => {
     const feed = buildFeed(signatures, matches);
-    // In demo mode iterate the three demo orgs; in real mode iterate whatever
-    // real orgs have actually registered/submitted.
-    const orgIds = demoMode
-      ? [...ORG_IDS]
-      : orgs.filter((o) => o.kind === "real").map((o) => o.org_id);
+
+    // Every org that has actually taken part, whether or not it is one of ours.
+    // This is what makes a real external org — someone running the agent on
+    // their own machine against their own logs — visible across the dashboard.
+    // Iterating a hardcoded demo trio meant a real org could submit signatures,
+    // join a match, and appear nowhere.
+    const participating = new Set<string>();
+    for (const s of signatures) participating.add(s.org_id);
+    for (const m of matches) for (const id of m.org_ids) participating.add(id);
+    for (const o of orgs) {
+      // Real orgs are also shown once registered, so a node appears the moment
+      // it joins rather than only after its first signature lands.
+      if (o.kind === "real") participating.add(o.org_id);
+    }
+
+    // Demo orgs are always shown in demo mode so the mesh looks populated
+    // before anything has happened; in real mode nothing is assumed.
+    const nextOrgIds = demoMode
+      ? Array.from(new Set([...ORG_IDS, ...participating]))
+      : Array.from(participating);
+
+    // Reuse the previous array when the membership is unchanged. `signatures`
+    // is a fresh array on every poll, so without this every consumer that keys
+    // an effect on orgIds would re-run ~every 1.6s — long enough to stop a
+    // slower interval from ever firing.
+    const orgIds =
+      lastOrgIds.current.length === nextOrgIds.length &&
+      lastOrgIds.current.every((id, i) => id === nextOrgIds[i])
+        ? lastOrgIds.current
+        : (lastOrgIds.current = nextOrgIds);
     return {
       link,
       demoMode,

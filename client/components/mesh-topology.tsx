@@ -1,22 +1,44 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { ORG_IDS, orgLabel, type MatchRecord, type SignatureRecord } from "@/lib/api";
+import { orgLabel, type MatchRecord, type SignatureRecord } from "@/lib/api";
 import { useSystem } from "@/lib/system-context";
 
-/** Fixed geometry — wires are shared between the drawn line and the packet path. */
+// Geometry is computed from however many orgs are actually in the mesh rather
+// than hardcoded per org id. A real external org — someone running the agent on
+// their own machine — has to be able to appear here, and it cannot be assumed
+// there will be exactly three.
 const NODE = { w: 196, h: 84 };
-const ORG_Y: Record<string, number> = { org_a: 76, org_b: 200, org_c: 324 };
 const ORG_X = 140;
-const HUB = { x: 540, y: 200, r: 64 };
-const GATE = { x: 830, y: 200, w: 180, h: 96 };
+const NODE_RIGHT = 238;
+const TOP_MARGIN = 76;
+const ROW_GAP = 124;
+const HUB_X = 540;
+const HUB_R = 64;
+const GATE_X = 830;
+const GATE_SIZE = { w: 180, h: 96 };
+const VIEW_W = 960;
 
-const WIRES: Record<string, string> = {
-  org_a: "M 238 76 C 360 76, 404 200, 474 200",
-  org_b: "M 238 200 L 474 200",
-  org_c: "M 238 324 C 360 324, 404 200, 474 200",
-};
-const GATE_WIRE = "M 606 200 L 738 200";
+function layout(orgIds: string[]) {
+  const height = Math.max(400, TOP_MARGIN * 2 + Math.max(0, orgIds.length - 1) * ROW_GAP);
+  const hubY = height / 2;
+  const rows = orgIds.map((id, i) => ({ id, y: TOP_MARGIN + i * ROW_GAP }));
+  const wires = Object.fromEntries(
+    rows.map(({ id, y }) => [
+      id,
+      // A cubic that flattens into a straight line when the node is level with
+      // the hub, so one expression covers every row.
+      `M ${NODE_RIGHT} ${y} C 360 ${y}, 404 ${hubY}, ${HUB_X - HUB_R - 2} ${hubY}`,
+    ]),
+  ) as Record<string, string>;
+  return {
+    height,
+    hubY,
+    rows,
+    wires,
+    gateWire: `M ${HUB_X + HUB_R + 2} ${hubY} L ${GATE_X - GATE_SIZE.w / 2 - 2} ${hubY}`,
+  };
+}
 
 interface Packet {
   key: string;
@@ -24,7 +46,7 @@ interface Packet {
 }
 
 export function MeshTopology() {
-  const { signatures, matches, orgStatuses, arrivals, link } = useSystem();
+  const { signatures, matches, orgStatuses, arrivals, link, orgIds } = useSystem();
   const [packets, setPackets] = useState<Packet[]>([]);
 
   // Fire a travelling dot for every signature that genuinely just arrived.
@@ -58,23 +80,25 @@ export function MeshTopology() {
         ? "var(--crossed)"
         : "var(--line-strong)";
 
+  const { height, hubY, rows, wires, gateWire } = layout(orgIds);
+
   return (
     <svg
-      viewBox="0 0 960 400"
+      viewBox={`0 0 ${VIEW_W} ${height}`}
       className="w-full h-auto"
       role="img"
-      aria-label="Live mesh topology: three isolated org agents, a correlation engine, and a human approval gate."
+      aria-label={`Live mesh topology: ${orgIds.length} isolated org agents, a correlation engine, and a human approval gate.`}
     >
       {/* wires */}
-      {ORG_IDS.map((id) => (
+      {rows.map(({ id }) => (
         <path
           key={`wire-${id}`}
-          d={WIRES[id]}
+          d={wires[id]}
           className={`wire ${disclosedOrgs.has(id) ? "wire-hot" : ""}`}
         />
       ))}
       <path
-        d={GATE_WIRE}
+        d={gateWire}
         className="wire"
         style={{ stroke: gateTone, opacity: pending.length || disclosed.length ? 0.9 : 0.5 }}
       />
@@ -88,16 +112,16 @@ export function MeshTopology() {
           cy={0}
           fill="var(--local)"
           className="packet"
-          style={{ offsetPath: `path("${WIRES[p.orgId]}")` }}
+          style={{ offsetPath: `path("${wires[p.orgId] ?? gateWire}")` }}
         />
       ))}
 
       {/* org nodes */}
-      {ORG_IDS.map((id) => (
+      {rows.map(({ id, y }) => (
         <OrgNode
           key={id}
           orgId={id}
-          y={ORG_Y[id]}
+          y={y}
           signatures={signatures.filter((s) => s.org_id === id)}
           matches={matches}
           statusKnown={link === "online"}
@@ -110,9 +134,9 @@ export function MeshTopology() {
       <g>
         {(pending.length > 0 || disclosed.length > 0) && (
           <circle
-            cx={HUB.x}
-            cy={HUB.y}
-            r={HUB.r}
+            cx={HUB_X}
+            cy={hubY}
+            r={HUB_R}
             fill="none"
             stroke={hubTone}
             strokeWidth={1.5}
@@ -120,16 +144,16 @@ export function MeshTopology() {
           />
         )}
         <circle
-          cx={HUB.x}
-          cy={HUB.y}
-          r={HUB.r}
+          cx={HUB_X}
+          cy={hubY}
+          r={HUB_R}
           fill="var(--surface)"
           stroke={hubTone}
           strokeWidth={1.5}
         />
         <text
-          x={HUB.x}
-          y={HUB.y - 20}
+          x={HUB_X}
+          y={hubY - 20}
           textAnchor="middle"
           className="label"
           fill="var(--fg-subtle)"
@@ -138,8 +162,8 @@ export function MeshTopology() {
           CORRELATOR
         </text>
         <text
-          x={HUB.x}
-          y={HUB.y + 8}
+          x={HUB_X}
+          y={hubY + 8}
           textAnchor="middle"
           fill="var(--fg)"
           style={{ fontSize: 30, fontWeight: 600 }}
@@ -148,8 +172,8 @@ export function MeshTopology() {
           {signatures.length}
         </text>
         <text
-          x={HUB.x}
-          y={HUB.y + 28}
+          x={HUB_X}
+          y={hubY + 28}
           textAnchor="middle"
           fill="var(--fg-muted)"
           style={{ fontSize: 10.5 }}
@@ -157,8 +181,8 @@ export function MeshTopology() {
           signatures
         </text>
         <text
-          x={HUB.x}
-          y={HUB.y + 44}
+          x={HUB_X}
+          y={hubY + 44}
           textAnchor="middle"
           fill="var(--fg-subtle)"
           style={{ fontSize: 9.5 }}
@@ -171,10 +195,10 @@ export function MeshTopology() {
       {/* human approval gate */}
       <g>
         <rect
-          x={GATE.x - GATE.w / 2}
-          y={GATE.y - GATE.h / 2}
-          width={GATE.w}
-          height={GATE.h}
+          x={GATE_X - GATE_SIZE.w / 2}
+          y={hubY - GATE_SIZE.h / 2}
+          width={GATE_SIZE.w}
+          height={GATE_SIZE.h}
           rx={14}
           fill="var(--surface)"
           stroke={gateTone}
@@ -182,8 +206,8 @@ export function MeshTopology() {
           strokeDasharray={pending.length > 0 ? "0" : "5 5"}
         />
         <text
-          x={GATE.x}
-          y={GATE.y - 24}
+          x={GATE_X}
+          y={hubY - 24}
           textAnchor="middle"
           className="label"
           fill="var(--fg-subtle)"
@@ -194,8 +218,8 @@ export function MeshTopology() {
         {pending.length > 0 ? (
           <>
             <text
-              x={GATE.x}
-              y={GATE.y + 6}
+              x={GATE_X}
+              y={hubY + 6}
               textAnchor="middle"
               fill="var(--hold)"
               style={{ fontSize: 22, fontWeight: 600 }}
@@ -203,8 +227,8 @@ export function MeshTopology() {
               {pending.length} held
             </text>
             <text
-              x={GATE.x}
-              y={GATE.y + 26}
+              x={GATE_X}
+              y={hubY + 26}
               textAnchor="middle"
               fill="var(--fg-muted)"
               style={{ fontSize: 10.5 }}
@@ -215,8 +239,8 @@ export function MeshTopology() {
         ) : disclosed.length > 0 ? (
           <>
             <text
-              x={GATE.x}
-              y={GATE.y + 6}
+              x={GATE_X}
+              y={hubY + 6}
               textAnchor="middle"
               fill="var(--crossed)"
               style={{ fontSize: 20, fontWeight: 600 }}
@@ -224,8 +248,8 @@ export function MeshTopology() {
               {disclosed.length} disclosed
             </text>
             <text
-              x={GATE.x}
-              y={GATE.y + 26}
+              x={GATE_X}
+              y={hubY + 26}
               textAnchor="middle"
               fill="var(--fg-muted)"
               style={{ fontSize: 10.5 }}
@@ -236,8 +260,8 @@ export function MeshTopology() {
         ) : (
           <>
             <text
-              x={GATE.x}
-              y={GATE.y + 4}
+              x={GATE_X}
+              y={hubY + 4}
               textAnchor="middle"
               fill="var(--fg-subtle)"
               style={{ fontSize: 15 }}
@@ -245,8 +269,8 @@ export function MeshTopology() {
               nothing to review
             </text>
             <text
-              x={GATE.x}
-              y={GATE.y + 24}
+              x={GATE_X}
+              y={hubY + 24}
               textAnchor="middle"
               fill="var(--fg-subtle)"
               style={{ fontSize: 10.5 }}

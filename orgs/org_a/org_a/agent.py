@@ -141,20 +141,88 @@ TECHNIQUE_INSTRUCTIONS = (
 )
 
 
+_JSON_FENCE_RE = re.compile(r"```(?:json)?\s*(\{.*?\})\s*```", re.DOTALL)
+
+
+def _loads_lenient(text: str) -> dict[str, Any]:
+    """Parse the JSON object out of a model reply.
+
+    Not every Open-Responses endpoint honours `text.format.json_schema`. Venice,
+    for one, accepts the request and returns prose anyway — measured across five
+    models, reasoning and not. Rather than restrict which providers this agent
+    works with, the schema is also stated in the prompt and the reply is parsed
+    leniently: exact JSON first, then a fenced block, then the first balanced
+    object in the text.
+
+    This is recovery, not guesswork — every field is still validated by the
+    caller (`_TECHNIQUE_RE`, the confidence clamp, `_leaks_identity`), so a
+    malformed or invented reply is rejected exactly as before.
+    """
+    text = text.strip()
+    try:
+        parsed = json.loads(text)
+        if isinstance(parsed, dict):
+            return parsed
+    except ValueError:
+        pass
+
+    fenced = _JSON_FENCE_RE.search(text)
+    if fenced:
+        try:
+            parsed = json.loads(fenced.group(1))
+            if isinstance(parsed, dict):
+                return parsed
+        except ValueError:
+            pass
+
+    start = text.find("{")
+    while start != -1:
+        depth, in_string, escaped = 0, False, False
+        for index in range(start, len(text)):
+            char = text[index]
+            if in_string:
+                if escaped:
+                    escaped = False
+                elif char == "\\":
+                    escaped = True
+                elif char == '"':
+                    in_string = False
+                continue
+            if char == '"':
+                in_string = True
+            elif char == "{":
+                depth += 1
+            elif char == "}":
+                depth -= 1
+                if depth == 0:
+                    try:
+                        parsed = json.loads(text[start : index + 1])
+                        if isinstance(parsed, dict):
+                            return parsed
+                    except ValueError:
+                        pass
+                    break
+        start = text.find("{", start + 1)
+
+    raise ValueError(f"no JSON object in model reply: {text[:160]!r}")
+
+
 def _structured_output(response: dict[str, Any]) -> dict[str, Any]:
     """Pull the JSON payload out of an Open-Responses-shaped model response."""
     text = response.get("output_text")
     if isinstance(text, str) and text.strip():
-        return json.loads(text)
+        return _loads_lenient(text)
 
     for item in response.get("output", []) or []:
         # Reasoning-tuned models emit a 'reasoning' item before the answer; only
-        # the 'message' item carries the schema-constrained JSON.
+        # the 'message' item carries the answer.
         if not isinstance(item, dict) or item.get("type") != "message":
             continue
         for part in item.get("content", []) or []:
             if isinstance(part, dict) and isinstance(part.get("text"), str):
-                return json.loads(part["text"])
+                if not part["text"].strip():
+                    continue
+                return _loads_lenient(part["text"])
 
     error = response.get("error")
     if error:
@@ -171,14 +239,35 @@ def _ask(
     row: dict[str, str],
 ) -> dict[str, Any]:
     """One schema-constrained model call, retried on transient failure."""
+    # The schema is sent twice on purpose: as `text.format` for endpoints that
+    # enforce it, and restated in the prompt for those that quietly ignore it.
+    # Belt and braces costs a few tokens and is the difference between working
+    # against any Open-Responses provider and only the strict ones.
+    instructions = (
+        f"{instructions}\n\n"
+        f"Reply with ONLY a JSON object matching this schema, and nothing else "
+        f"— no prose, no explanation, no markdown fences:\n{json.dumps(schema)}"
+    )
     last: Exception | None = None
     for attempt in range(MODEL_ATTEMPTS):
         try:
             response = agent.responses.create(
                 {
                     "model": model,
-                    "instructions": instructions,
-                    "input": f"Log line (JSON): {json.dumps(row)}",
+                    # Sent as a system item in `input` rather than the separate
+                    # `instructions` field: some Open-Responses endpoints drop
+                    # `instructions` silently, so the model answers as if it had
+                    # no system prompt at all — measured on Venice, which then
+                    # returned conversational prose for every model. `input`
+                    # accepting a list of item objects is part of the spec, and
+                    # is honoured everywhere tested.
+                    "input": [
+                        {"role": "system", "content": instructions},
+                        {
+                            "role": "user",
+                            "content": f"Log line (JSON): {json.dumps(row)}",
+                        },
+                    ],
                     "text": {
                         "format": {
                             "type": "json_schema",
@@ -429,7 +518,7 @@ def _resolve_source(context: Context) -> tuple[str, Path, Path]:
 def main(agent: AgentSession, context: Context) -> None:
     org_id = str(context.run_config["agent.org_id"])
     server_url = str(context.run_config["agent.server_url"])
-    model = str(context.run_config.get("agent.model", "/models/Kimi-K2.7-Code"))
+    model = str(context.run_config.get("agent.model", "zai-org-glm-5-2"))
 
     spec, base_dir, log_path = _resolve_source(context)
     kind, _argument = sources.parse_spec(spec)

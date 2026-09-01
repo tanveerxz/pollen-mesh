@@ -27,4 +27,4 @@ log_source = ""
 log_event_ids = "400,403,4104"
 log_max_events = 40
 server_url = "http://localhost:8000/api/signatures"
-model = "/models/Kimi-K2.7-Code"
+model = "zai-org-glm-5-2"

@@ -3,7 +3,6 @@
 import { useMemo, useState } from "react";
 import Link from "next/link";
 import {
-  ORG_IDS,
   formatWindow,
   orgLabel,
   type MatchRecord,
@@ -12,7 +11,7 @@ import {
 import { useSystem } from "@/lib/system-context";
 
 export default function CorrelatorPage() {
-  const { signatures, matches } = useSystem();
+  const { signatures, matches, orgIds } = useSystem();
   const [hovered, setHovered] = useState<string | null>(null);
 
   const bounds = useMemo(() => {
@@ -112,7 +111,7 @@ export default function CorrelatorPage() {
                 })}
 
                 <div className="relative flex flex-col gap-2.5">
-                  {ORG_IDS.map((orgId) => (
+                  {orgIds.map((orgId) => (
                     <Lane
                       key={orgId}
                       orgId={orgId}
