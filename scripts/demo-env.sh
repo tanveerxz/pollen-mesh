@@ -48,11 +48,38 @@ fi
 # encode; without this the CLI's own log stream silently stops mid-run.
 export PYTHONIOENCODING=utf-8
 
+# --- fast agent startup (demo convenience, opt-out) --------------------------
+#
+# By default Flower creates a fresh runtime environment per run and installs the
+# app's dependencies into it with `uv sync`. That is the right default — it is
+# what makes a run reproducible on a machine you do not control — but it costs
+# ~46s of dead air per agent, measured with zero model calls, and a demo slot is
+# three to five minutes.
+#
+# With this on, the app runs in the SuperLink's own Python environment instead:
+# ~12s. The trade-off is real and worth stating plainly — the app no longer gets
+# its own isolated dependency set, so it inherits whatever the SuperLink was
+# started with. That is safe HERE because all four projects in this repo declare
+# the same dependencies (flwr + requests), and it is verified: an org_a run
+# executes correctly through a SuperLink started from org_c's venv.
+#
+# Set POLLEN_FAST_AGENTS=0 to turn it off and get Flower's normal isolation.
+POLLEN_FAST_AGENTS="${POLLEN_FAST_AGENTS:-1}"
+if [ "$POLLEN_FAST_AGENTS" = "1" ]; then
+  export FLWR_DISABLE_RUNTIME_DEPENDENCY_INSTALLATION=1
+  _startup="fast (~12s/run, shared env)"
+else
+  unset FLWR_DISABLE_RUNTIME_DEPENDENCY_INSTALLATION
+  _startup="isolated (~46s/run, uv sync per run)"
+fi
+
 echo "provider : $_provider"
 echo "endpoint : $FLWR_MODEL_API_ENDPOINT"
 echo "model    : $POLLEN_MODEL"
 echo "key      : ${FLWR_MODEL_API_KEY:0:10}… (${#FLWR_MODEL_API_KEY} chars)"
+echo "startup  : $_startup"
 echo
-echo "The local SuperLink keeps whatever environment it FIRST started with."
-echo "If you change any of the above, kill flower-superlink before running:"
+echo "The local SuperLink keeps whatever environment it FIRST started with, so"
+echo "changing ANY of the above — including POLLEN_FAST_AGENTS — does nothing"
+echo "until it is restarted:"
 echo "    scripts/kill-superlink.sh"
