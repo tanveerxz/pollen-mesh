@@ -145,6 +145,11 @@ export default function GuidedDemo() {
   const [error, setError] = useState<string | null>(null);
   const [notes, setNotes] = useState(true);
   const [launched, setLaunched] = useState(false);
+  // Whether the delivered attack used the stand-in detector. The fallback path
+  // creates signatures instantly and starts no agents, so stage 3 has to say
+  // that rather than offering a "Run the agents" button over empty panels —
+  // clicking it mid-fallback starts the slow path you were avoiding.
+  const [simulatedRun, setSimulatedRun] = useState(false);
   const [scenarios, setScenarios] = useState<AttackScenario[]>([]);
   const [scenarioId, setScenarioId] = useState(DEFAULT_SCENARIO);
 
@@ -258,6 +263,7 @@ export default function GuidedDemo() {
       const res = await launchAttack(scenarioId, mode);
       markSimulated(res.detected.map((d) => d.signature_id));
       setLaunched(true);
+      setSimulatedRun(mode === "demo");
       refresh();
     });
 
@@ -287,6 +293,7 @@ export default function GuidedDemo() {
       setRuns({});
       setPinnedId(null);
       setLaunched(false);
+      setSimulatedRun(false);
       highest.current = 0;
       setI(0);
     });
@@ -400,6 +407,7 @@ export default function GuidedDemo() {
             starting={working === "agents"}
             anyRunning={anyRunning}
             onStop={() => act("stop", async () => void (await stopAgents()))}
+            simulated={simulatedRun}
           />
         )}
 
@@ -608,6 +616,7 @@ function Reason({
   starting,
   anyRunning,
   onStop,
+  simulated,
 }: {
   runs: Record<string, AgentRun>;
   logs: Record<string, LogRow[]>;
@@ -618,14 +627,26 @@ function Reason({
   starting: boolean;
   anyRunning: boolean;
   onStop: () => void;
+  simulated: boolean;
 }) {
   const live = Object.values(runs);
   return (
     <div className="grid gap-5">
       <section className="panel flex flex-wrap items-center gap-3 p-5">
-        <p className="text-[13px] text-fg-muted">
-          Each agent reads <em>only</em> its own file. The single outbound call it
-          ever makes is one stripped signature.
+        <p className="max-w-[62ch] text-[13px] text-fg-muted">
+          {simulated ? (
+            <>
+              <span className="chip chip-idle mr-2">simulated</span>
+              A deterministic detector stood in for the model step. It read the
+              same rows and derived the same indicator — correlation and both
+              approval gates below are the real code.
+            </>
+          ) : (
+            <>
+              Each agent reads <em>only</em> its own file. The single outbound
+              call it ever makes is one stripped signature.
+            </>
+          )}
         </p>
         <span className="ml-auto flex gap-2">
           {anyRunning && (
@@ -633,8 +654,19 @@ function Reason({
               Abort
             </button>
           )}
-          <button className="btn btn-primary" onClick={onRunAgents} disabled={starting || anyRunning}>
-            {starting ? "Starting…" : anyRunning ? "Agents running…" : "Run the agents"}
+          <button
+            className={simulated ? "btn" : "btn btn-primary"}
+            onClick={onRunAgents}
+            disabled={starting || anyRunning}
+            title={simulated ? "Runs the real Flower agents — slower" : undefined}
+          >
+            {starting
+              ? "Starting…"
+              : anyRunning
+                ? "Agents running…"
+                : simulated
+                  ? "Run the real agents anyway"
+                  : "Run the agents"}
           </button>
         </span>
       </section>
