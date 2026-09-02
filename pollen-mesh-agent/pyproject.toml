@@ -1,6 +1,6 @@
 [project]
 name = "pollen-mesh-agent"
-version = "0.1.1"
+version = "0.1.2"
 description = "Triage your own security log locally and share only a stripped, hashed signature — so cross-organization threat correlation never requires handing over raw telemetry."
 license = { file = "LICENSE" }
 readme = "README.md"
@@ -40,6 +40,6 @@ log_max_events = 40
 # Where stripped signatures are submitted. Point this at your own correlator.
 server_url = "http://localhost:8000/api/signatures"
 # Any Open-Responses-compatible model reachable from the SuperLink. The value is
-# whatever the configured endpoint calls the model — for OpenRouter (see the
-# README) that is a slug like "moonshotai/kimi-k2.7-code".
+# whatever the configured endpoint calls the model. Venice calls GLM-5.2
+# "zai-org-glm-5-2"; on OpenRouter the same model is "z-ai/glm-5.2".
 model = "zai-org-glm-5-2"

@@ -79,7 +79,10 @@ All settings come from run config, so one app serves any organization:
 | `agent.org_id` | `my-org` | identifies you in submitted signatures |
 | `agent.log_path` | `data/mock_log.jsonl` | the only file this agent reads |
 | `agent.server_url` | `http://localhost:8000/api/signatures` | your correlator endpoint |
-| `agent.model` | `/models/Kimi-K2.7-Code` | any Open-Responses-compatible model |
+| `agent.log_source` | *(blank)* | where telemetry comes from: `jsonl:<path>`, `file:<path>`, or `winevent:<channel>` for the live Windows Event Log. Blank means treat `log_path` as JSONL |
+| `agent.log_event_ids` | `400,403,4104` | winevent only: which event ids to read |
+| `agent.log_max_events` | `40` | winevent only: how many to read per run |
+| `agent.model` | `zai-org-glm-5-2` | whatever the configured endpoint calls the model |
 
 The log is JSONL, one object per line:
 
@@ -100,7 +103,25 @@ flwr run . supergrid \
 
 Model calls are routed through the SuperLink, so the endpoint and credentials are
 supplied by your Flower environment (`FLWR_MODEL_API_ENDPOINT` / `FLWR_MODEL_API_KEY`)
-rather than baked into the app.
+rather than baked into the app. Any endpoint that speaks the Open-Responses API
+works; `agent.model` is whatever that endpoint calls the model. Note that some
+endpoints ignore `text.format` JSON schema, or drop the `instructions` field
+entirely, so the agent sends its schema both ways and parses replies leniently.
+
+### Reading real telemetry
+
+The default reads a small JSONL sample. To point it at a real machine's own log:
+
+```bash
+flwr run . --run-config 'agent.log_source="winevent:Windows PowerShell"'
+```
+
+The classic `Windows PowerShell` channel records the full command line, is on by
+default, and is readable without admin. Command lines arrive base64-encoded via
+`-EncodedCommand`; the agent decodes them before triage, so an indicator an
+attacker obfuscated still correlates with the same indicator seen in the clear
+somewhere else. Usernames and machine names are redacted before any line is sent
+to a model.
 
 On Windows, set `PYTHONIOENCODING=utf-8` first — model output contains characters the
 legacy console codepage cannot encode.

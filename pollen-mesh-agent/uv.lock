@@ -958,7 +958,7 @@ wheels = [
 
 [[package]]
 name = "pollen-mesh-agent"
-version = "0.1.1"
+version = "0.1.2"
 source = { virtual = "." }
 dependencies = [
     { name = "flwr" },
