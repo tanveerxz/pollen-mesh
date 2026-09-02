@@ -8,6 +8,7 @@ import { useSystem } from "@/lib/system-context";
 import { useDemo } from "@/lib/demo-context";
 import {
   approveMatch,
+  getAttacks,
   formatClock,
   getAgentRuns,
   getOrgLog,
@@ -17,6 +18,7 @@ import {
   runAgents,
   stopAgents,
   type AgentRun,
+  type AttackScenario,
   type LaunchMode,
   type LogRow,
   type MatchRecord,
@@ -28,25 +30,40 @@ import {
  *
  * The six-act home page shows the same sequence, but as one long scroll with
  * the correlator and org views on other routes. Presenting from it means
- * scrolling and switching pages mid-demo. Here each stage fills the screen,
- * carries its own narration, and advances itself the moment the REAL server
- * state satisfies it — nothing here fabricates progress, and every stage is
- * reading the same endpoints every other page reads.
+ * scrolling and switching pages mid-demo. Here each stage fills the screen and
+ * carries its own narration.
+ *
+ * Stages are advanced BY THE PRESENTER, never automatically: a page that jumps
+ * forward on its own will do it mid-sentence. `done()` is still evaluated, but
+ * only to colour the progress rail and to tell the control scenario (which
+ * correctly produces no match) apart from one that is still waiting.
+ *
+ * Nothing here fabricates progress — every stage reads the same endpoints every
+ * other page reads.
  */
 
-const SCENARIO = "phishing_macro_c2";
+const DEFAULT_SCENARIO = "phishing_macro_c2";
+
+type Copy = string | ((s: Ctx) => string);
 
 interface Stage {
   id: string;
-  title: string;
+  title: Copy;
   /** Read this out. Deliberately short — a slide note, not a script. */
-  say: string;
+  say: Copy;
   /** True once the real server state has satisfied this stage. */
   done: (s: Ctx) => boolean;
 }
 
+const text = (c: Copy, s: Ctx): string => (typeof c === "function" ? c(s) : c);
+
+/** A scenario that targets one org is the control: it must produce no match. */
+const isControl = (s: Ctx) => (s.scenario?.org_ids.length ?? 2) < 2;
+
 interface Ctx {
   online: boolean;
+  /** The scenario chosen for this run, so stage copy can match it. */
+  scenario: AttackScenario | null;
   /** An attack has actually been delivered in this session. */
   delivered: boolean;
   logRows: number;
@@ -66,8 +83,14 @@ const STAGES: Stage[] = [
   },
   {
     id: "attack",
-    title: "The same attacker hits two of them",
-    say: "The same lure lands at two of them, hours apart. This writes real events into their actual log files — nothing is pre-staged. From here each org has to find it in its own telemetry.",
+    title: (s) =>
+      s.scenario
+        ? `${s.scenario.name} — ${s.scenario.org_ids.length} organisation${s.scenario.org_ids.length === 1 ? "" : "s"}`
+        : "The attack arrives",
+    say: (s) =>
+      (s.scenario?.summary ??
+        "Launching a scenario writes real events into the targeted organisations' own log files.") +
+      " Nothing is pre-staged — from here each org has to find it in its own telemetry.",
     // NOT "the logs have rows in them" — every org starts with a baseline log,
     // so that was true immediately and the demo skipped straight past this
     // stage on load.
@@ -81,9 +104,14 @@ const STAGES: Stage[] = [
   },
   {
     id: "correlate",
-    title: "The overlap appears",
-    say: "Both hashed the same attacker infrastructure independently and got the same value, without either seeing the other's data. The match is deterministic — no model decides what correlates.",
-    done: (s) => s.match !== null,
+    title: (s) => (isControl(s) ? "Nothing correlates — correctly" : "The overlap appears"),
+    say: (s) =>
+      isControl(s)
+        ? "Only one organisation saw this. There is nothing to correlate, and the mesh says so rather than inventing a link. A system that finds a pattern in every input is not detecting anything."
+        : "Each hashed the same attacker infrastructure independently and got the same value, without either seeing the other's data. The match is deterministic — no model decides what correlates.",
+    // The control has no match to reach, so it is complete once the agents have
+    // finished and declined to produce one.
+    done: (s) => (isControl(s) ? s.agentsFinished || s.signatures > 0 : s.match !== null),
   },
   {
     id: "disclose",
@@ -116,10 +144,15 @@ export default function GuidedDemo() {
   const [working, setWorking] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notes, setNotes] = useState(true);
-  const [auto, setAuto] = useState(true);
   const [launched, setLaunched] = useState(false);
+  const [scenarios, setScenarios] = useState<AttackScenario[]>([]);
+  const [scenarioId, setScenarioId] = useState(DEFAULT_SCENARIO);
 
   const highest = useRef(0);
+
+  useEffect(() => {
+    getAttacks().then(setScenarios).catch(() => {});
+  }, []);
 
   /* ---- real state, read from the same endpoints as every other page ---- */
   // The demo follows ONE match all the way through. Without pinning it, a
@@ -145,6 +178,7 @@ export default function GuidedDemo() {
   const ctx: Ctx = useMemo(
     () => ({
       online: link === "online",
+      scenario: scenarios.find((x) => x.id === scenarioId) ?? null,
       // `|| signatures.length > 0` so reloading the page mid-demo resumes at
       // the right stage instead of rewinding to "no attack yet".
       delivered: launched || signatures.length > 0,
@@ -155,7 +189,7 @@ export default function GuidedDemo() {
       resolved: match ? match.status === "resolved" : false,
       agentsFinished: liveRuns.length > 0 && !anyRunning,
     }),
-    [link, launched, logRows, signatures.length, match, liveRuns.length, anyRunning],
+    [link, scenarios, scenarioId, launched, logRows, signatures.length, match, liveRuns.length, anyRunning],
   );
 
   /* ---- polling: agent runs and each org's own raw log ---- */
@@ -190,17 +224,6 @@ export default function GuidedDemo() {
     };
   }, [orgIds]);
 
-  /* ---- auto-advance, but never backwards ---- */
-  useEffect(() => {
-    if (!auto) return;
-    let target = 0;
-    while (target < STAGES.length - 1 && STAGES[target].done(ctx)) target += 1;
-    if (target > highest.current) {
-      highest.current = target;
-      setI(target);
-    }
-  }, [ctx, auto]);
-
   const go = useCallback((n: number) => {
     const next = Math.max(0, Math.min(n, STAGES.length - 1));
     setI(next);
@@ -232,7 +255,7 @@ export default function GuidedDemo() {
 
   const onLaunch = () =>
     act("launch", async () => {
-      const res = await launchAttack(SCENARIO, mode);
+      const res = await launchAttack(scenarioId, mode);
       markSimulated(res.detected.map((d) => d.signature_id));
       setLaunched(true);
       refresh();
@@ -280,7 +303,7 @@ export default function GuidedDemo() {
             <button
               key={s.id}
               onClick={() => go(n)}
-              title={s.title}
+              title={typeof s.title === "string" ? s.title : undefined}
               aria-current={n === i ? "step" : undefined}
               className="group flex-1 py-2"
             >
@@ -308,13 +331,6 @@ export default function GuidedDemo() {
           <button className="chip chip-idle" onClick={() => setNotes((v) => !v)}>
             {notes ? "hide notes" : "show notes"} <span className="mono">n</span>
           </button>
-          <button
-            className="chip chip-idle"
-            onClick={() => setAuto((v) => !v)}
-            title="Advance automatically when the server state reaches the next stage"
-          >
-            {auto ? "auto-advance on" : "manual"}
-          </button>
           <Link href="/" className="chip chip-idle">
             full page
           </Link>
@@ -324,14 +340,14 @@ export default function GuidedDemo() {
       {/* headline */}
       <header className="mt-5">
         <h1 className="text-[clamp(1.6rem,3.2vw,2.3rem)] font-semibold leading-[1.1] tracking-tight">
-          {stage.title}
+          {text(stage.title, ctx)}
         </h1>
         {notes && (
           <p
             className="mt-2.5 max-w-[78ch] border-l-2 pl-3.5 text-[14px] leading-relaxed text-fg-muted"
             style={{ borderColor: "var(--hold)" }}
           >
-            {stage.say}
+            {text(stage.say, ctx)}
           </p>
         )}
       </header>
@@ -367,6 +383,9 @@ export default function GuidedDemo() {
             working={working === "launch"}
             logs={logs}
             orgIds={orgIds}
+            scenarios={scenarios}
+            scenarioId={scenarioId}
+            setScenarioId={setScenarioId}
           />
         )}
 
@@ -385,7 +404,7 @@ export default function GuidedDemo() {
         )}
 
         {stage.id === "correlate" && (
-          <Correlate match={match} signatures={signatures} />
+          <Correlate match={match} signatures={signatures} control={isControl(ctx)} />
         )}
 
         {stage.id === "disclose" && (
@@ -469,6 +488,9 @@ function Attack({
   working,
   logs,
   orgIds,
+  scenarios,
+  scenarioId,
+  setScenarioId,
 }: {
   mode: LaunchMode;
   setMode: (m: LaunchMode) => void;
@@ -476,9 +498,46 @@ function Attack({
   working: boolean;
   logs: Record<string, LogRow[]>;
   orgIds: string[];
+  scenarios: AttackScenario[];
+  scenarioId: string;
+  setScenarioId: (id: string) => void;
 }) {
   return (
     <div className="grid gap-5">
+      {/* Scenario choice. The one-org scenario is the control and is labelled
+          as such — it is supposed to produce no match, and showing that the
+          mesh declines to invent a correlation is worth as much as showing it
+          find one. */}
+      <div className="grid gap-2.5 sm:grid-cols-2 lg:grid-cols-4">
+        {scenarios.map((s) => {
+          const selected = s.id === scenarioId;
+          const control = s.org_ids.length < 2;
+          return (
+            <button
+              key={s.id}
+              onClick={() => setScenarioId(s.id)}
+              className="panel p-3.5 text-left transition"
+              style={{
+                borderColor: selected
+                  ? "var(--hold)"
+                  : "color-mix(in srgb, var(--line) 100%, transparent)",
+              }}
+            >
+              <div className="flex items-baseline gap-2">
+                <span className="label">{s.family}</span>
+                <span className="label ml-auto">
+                  {s.org_ids.length} org{s.org_ids.length === 1 ? "" : "s"}
+                </span>
+              </div>
+              <p className="mt-1 text-[13.5px] font-medium leading-snug">{s.name}</p>
+              {control && (
+                <span className="chip chip-idle mt-2">control — expect no match</span>
+              )}
+            </button>
+          );
+        })}
+      </div>
+
       <section className="panel p-5">
         <div className="flex flex-wrap items-center gap-3">
           <span className="label">Detection</span>
@@ -626,10 +685,40 @@ function Reason({
 function Correlate({
   match,
   signatures,
+  control,
 }: {
   match: MatchRecord | null;
   signatures: { id: string; org_id: string; indicator_hash: string; window_start: string }[];
+  control: boolean;
 }) {
+  // The control scenario hits one organisation. Producing no match is the
+  // correct answer, and showing that the mesh declines to invent a link is
+  // worth as much as showing it find one — so it gets a result panel, not an
+  // empty state.
+  if (control && !match) {
+    const orgs = new Set(signatures.map((s) => s.org_id));
+    return (
+      <div className="grid gap-4">
+        <section
+          className="panel p-6"
+          style={{ borderColor: "color-mix(in srgb, var(--local) 45%, transparent)" }}
+        >
+          <p className="label">Result — no correlation</p>
+          <p className="mt-2 text-[clamp(1.2rem,3vw,1.7rem)] font-semibold">
+            {orgs.size} organisation{orgs.size === 1 ? "" : "s"} affected, no match
+            created
+          </p>
+          <p className="mt-3 max-w-[70ch] text-[13.5px] leading-relaxed text-fg-muted">
+            The agent escalated this locally and released a signature — the
+            attack was real and it was detected. But nobody else saw the same
+            indicator, so there is nothing to correlate and no disclosure to
+            approve. A system that finds a pattern in every input is not
+            detecting anything.
+          </p>
+        </section>
+      </div>
+    );
+  }
   if (!match) {
     // Waiting is part of the story — one org reporting alone is exactly the
     // situation this system exists to fix, so show it rather than a bare
