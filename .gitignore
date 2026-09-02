@@ -55,3 +55,8 @@ mock_log.watermark.json
 
 # Persisted correlator state (snapshot DB) — never committed
 server/.pollen-state.db
+
+# Presentation assets — personal photo (carries EXIF/GPS) and the built deck
+about_us.jpg
+deck_about_us.jpg
+pitch-deck.html
