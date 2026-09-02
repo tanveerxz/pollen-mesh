@@ -9,6 +9,7 @@ import { ThemeToggle } from "./theme-toggle";
 
 // Deliberately short: the walkthrough on "/" is the spine, these are depth views.
 const LINKS = [
+  { href: "/demo", label: "Demo" },
   { href: "/", label: "Walkthrough" },
   { href: "/correlator", label: "Correlator" },
   { href: "/architecture", label: "How it works" },
@@ -21,7 +22,7 @@ export function Nav() {
 
   return (
     <header className="sticky top-0 z-40 glass border-b border-line">
-      <div className="mx-auto flex h-14 max-w-[1060px] items-center gap-5 px-6">
+      <div className="mx-auto flex h-14 max-w-[1180px] items-center gap-5 px-6">
         <Link href="/" className="flex shrink-0 items-center gap-2.5">
           <Logo />
           <span className="text-[14.5px] font-semibold tracking-tight">Pollen Mesh</span>

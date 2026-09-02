@@ -150,6 +150,10 @@ def demo_reset(restore_logs: bool = True) -> dict[str, object]:
     cleared_matches = len(store.matches)
     store.clear_all()
     persistence.wipe()
+    # Finished agent runs are state too. Left behind, the dashboard keeps
+    # showing the previous run's reasoning — including "aborted" banners — over
+    # a correlator that has just been emptied.
+    agent_runner.clear()
     restored = attacks.restore_logs(list(ORG_IDS)) if restore_logs else {}
     return {
         "cleared_signatures": cleared_signatures,

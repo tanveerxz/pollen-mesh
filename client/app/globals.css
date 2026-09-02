@@ -171,6 +171,14 @@ body {
   border-radius: 14px;
 }
 
+/* Raw telemetry that never leaves the org: dashed + the "stays local" green,
+   so a viewer can tell held-back content from released content at a glance. */
+.panel-local {
+  background: var(--surface);
+  border: 1px dashed color-mix(in srgb, var(--local) 55%, transparent);
+  border-radius: 14px;
+}
+
 .panel-inset {
   background: var(--sunken);
   border: 1px solid var(--line);
