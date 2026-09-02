@@ -79,7 +79,7 @@ export default function ApprovalPage(props: PageProps<"/approvals/[id]">) {
           )}
         </h1>
         <p className="mt-1.5 max-w-[62ch] text-[14px] leading-relaxed text-fg-muted">
-          Below is the complete disclosure — not a summary of it. These four fields are
+          Below is the complete disclosure, not a summary of it. These four fields are
           everything the mesh holds about this correlation, and everything the other
           organisations would receive.
         </p>
@@ -114,7 +114,7 @@ export default function ApprovalPage(props: PageProps<"/approvals/[id]">) {
               </>
             ) : (
               <span className="text-[14px] text-fg-muted">
-                None — matched on technique and overlapping time window
+                None: matched on technique and overlapping time window
               </span>
             )}
           </Field>
@@ -163,14 +163,14 @@ export default function ApprovalPage(props: PageProps<"/approvals/[id]">) {
               disabled={busy !== null}
               onClick={() => void act("approve")}
             >
-              {busy === "approve" ? "Approving…" : `Approve — disclose to ${match.org_ids.length} orgs`}
+              {busy === "approve" ? "Approving…" : `Approve: disclose to ${match.org_ids.length} orgs`}
             </button>
             <button
               className="btn flex-1"
               disabled={busy !== null}
               onClick={() => void act("reject")}
             >
-              {busy === "reject" ? "Rejecting…" : "Reject — keep it contained"}
+              {busy === "reject" ? "Rejecting…" : "Reject: keep it contained"}
             </button>
           </div>
           <p className="mt-2.5 text-center text-[12px] text-fg-subtle">

@@ -7,19 +7,19 @@ const STEPS = [
     n: "01",
     title: "Local reasoning",
     tone: "var(--local)",
-    body: "Each organisation runs its own Flower AgentApp against its own security log. An LLM classifies every line and, for anything worth escalating, extracts a stripped signature. A deterministic guard-rail then re-checks that signature for identifying content — independently of what the model claims it did — and the agent's own code, not the model, hashes the indicator before anything is sent.",
+    body: "Each organisation runs its own Flower AgentApp against its own security log. An LLM classifies every line and, for anything worth escalating, extracts a stripped signature. A deterministic guard-rail then re-checks that signature for identifying content, independently of what the model claims it did, and the agent's own code, not the model, hashes the indicator before anything is sent.",
   },
   {
     n: "02",
     title: "Deterministic correlation",
     tone: "var(--hold)",
-    body: "The only thing that ever leaves a node is that signature. A central service matches signatures across organisations using fixed, auditable rules: identical indicator hashes, or a shared technique with overlapping time windows. No model is involved in this step — correlation has to be reproducible and explainable, not probabilistic.",
+    body: "The only thing that ever leaves a node is that signature. A central service matches signatures across organisations using fixed, auditable rules: identical indicator hashes, or a shared technique with overlapping time windows. No model is involved in this step, correlation has to be reproducible and explainable, not probabilistic.",
   },
   {
     n: "03",
     title: "Human approval, twice",
     tone: "var(--crossed)",
-    body: "A match does nothing on its own. It is held until a human reviews the complete disclosure — four fields, nothing more — and approves it. Then each organisation separately approves its own local follow-up action. Two gates, both human, both required.",
+    body: "A match does nothing on its own. It is held until a human reviews the complete disclosure, four fields, nothing more, and approves it. Then each organisation separately approves its own local follow-up action. Two gates, both human, both required.",
   },
 ];
 
@@ -82,7 +82,7 @@ export default function ArchitecturePage() {
           no effect until a human acts; the approval screen renders the entire match
           record, so what a reviewer sees is provably the whole disclosure rather than a
           summary of it. Rejection is terminal. Every state change is a real transition
-          on the server — there is no path in this system that discloses anything
+          on the server. There is no path in this system that discloses anything
           automatically.
         </p>
       </section>
@@ -93,7 +93,7 @@ export default function ArchitecturePage() {
           Each organisation is a genuinely separate Flower <code className="mono">AgentApp</code>,
           packaged and executed independently through a SuperLink, with its own
           dependency environment, its own run configuration, and access to only its own
-          data file. That isolation is enforced by the runtime, not by convention — which
+          data file. That isolation is enforced by the runtime, not by convention, which
           is what makes the privacy claim structural rather than aspirational. Model
           calls are dispatched through Flower&apos;s own control plane via{" "}
           <code className="mono">agent.responses.create</code>, using Open Responses–shaped
@@ -122,7 +122,7 @@ function TechCard({ title, sub, note }: { title: string; sub: string; note: stri
 function FlowDiagram() {
   return (
     <svg viewBox="0 0 900 260" className="w-full h-auto" role="img" aria-label="Three-stage flow: local reasoning, deterministic correlation, human approval.">
-      {/* stage 1 — three sealed orgs */}
+      {/* stage 1, three sealed orgs */}
       {[40, 100, 160].map((y, i) => (
         <g key={y}>
           <rect
@@ -157,7 +157,7 @@ function FlowDiagram() {
         signature only
       </text>
 
-      {/* stage 2 — correlator */}
+      {/* stage 2, correlator */}
       <rect x={310} y={92} width={170} height={76} rx={12} fill="var(--surface)" stroke="var(--hold)" strokeWidth={1.4} />
       <text x={395} y={120} textAnchor="middle" fill="var(--fg)" style={{ fontSize: 12.5, fontWeight: 550 }}>
         correlation
@@ -174,7 +174,7 @@ function FlowDiagram() {
 
       <path d="M 480 130 L 560 130" className="wire" style={{ stroke: "var(--crossed)" }} />
 
-      {/* stage 3 — two human gates */}
+      {/* stage 3, two human gates */}
       <rect x={560} y={78} width={150} height={46} rx={10} fill="var(--surface)" stroke="var(--crossed)" strokeWidth={1.4} />
       <text x={635} y={98} textAnchor="middle" fill="var(--fg)" style={{ fontSize: 11.5, fontWeight: 500 }}>
         gate 1 · disclose?

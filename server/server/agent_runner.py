@@ -90,7 +90,7 @@ def _classify_line(body: str) -> tuple[str, str]:
     if body.startswith("noise"):
         return "noise", body.split("—", 1)[-1].strip()
     if "no external indicator" in body:
-        return "dropped", "Nothing external to share — kept local"
+        return "dropped", "Nothing external to share, kept local"
     if "failed" in body or "bad technique" in body or "guard-rail" in body:
         return "failed", body.strip()
     return "noise", body.strip()

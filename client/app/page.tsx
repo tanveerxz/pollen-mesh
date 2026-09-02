@@ -113,7 +113,7 @@ export default function Home() {
       markSimulated(res.detected.map((d) => d.signature_id));
       refresh();
       void loadLogs();
-      // Move the viewer to what just happened — otherwise the result renders
+      // Move the viewer to what just happened, otherwise the result renders
       // below the fold and the launch reads as "nothing happened".
       window.setTimeout(
         () => document.getElementById("act-3")?.scrollIntoView({ behavior: "smooth", block: "center" }),
@@ -175,7 +175,7 @@ export default function Home() {
           <p className="text-[13px]">
             <span className="font-medium">Correlation server unreachable.</span>{" "}
             <span className="text-fg-muted">
-              Expected at <code className="mono">{API_BASE_URL}</code> —{" "}
+              Expected at <code className="mono">{API_BASE_URL}</code>, {" "}
               <code className="mono">cd server &amp;&amp; uv run uvicorn server.main:app --port 8000</code>
             </span>
           </p>
@@ -240,7 +240,7 @@ export default function Home() {
                 <div className="mt-2.5 flex items-end gap-4">
                   <div>
                     <p className="tabular text-[17px] font-semibold leading-none">
-                      {logs[id]?.length ?? "—"}
+                      {logs[id]?.length ?? "·"}
                     </p>
                     <p className="label mt-0.5">events held</p>
                   </div>
@@ -262,7 +262,7 @@ export default function Home() {
         <Act
           n={2}
           title="An attack arrives"
-          blurb="Launching a scenario writes real events into the targeted organisations' own log files. Nothing is pre-staged — from here each org has to find it in its own telemetry."
+          blurb="Launching a scenario writes real events into the targeted organisations' own log files. Nothing is pre-staged, from here each org has to find it in its own telemetry."
           state={stateOf(1)}
           status={
             <ActChip
@@ -275,7 +275,7 @@ export default function Home() {
         >
           {!demoMode ? (
             <div className="panel p-4">
-              <p className="text-[13px] font-medium">Real mode — no attack console.</p>
+              <p className="text-[13px] font-medium">Real mode: no attack console.</p>
               <p className="mt-1 text-[12.5px] leading-relaxed text-fg-muted">
                 Real organisations run their own Flower agent on their own
                 infrastructure and submit signatures on their own. The server just
@@ -302,7 +302,7 @@ export default function Home() {
               </div>
               <p className="min-w-[240px] flex-1 text-[11.5px] leading-relaxed text-fg-subtle">
                 {mode === "real"
-                  ? "Writes the events, then you run the Flower agents yourself — live model, full pipeline."
+                  ? "Writes the events, then you run the Flower agents yourself: live model, full pipeline."
                   : "Writes the events, then a rule-based detector stands in for the LLM step so this takes seconds. Correlation is real either way."}
               </p>
               <button
@@ -311,7 +311,7 @@ export default function Home() {
                 disabled={!!demoBusy || anyRunning}
                 title={
                   anyRunning
-                    ? "Agents are still running — resetting now would discard their results"
+                    ? "Agents are still running. Resetting now would discard their results"
                     : "Clear all state and rewind every org log"
                 }
               >
@@ -381,7 +381,7 @@ export default function Home() {
                 {result.mode === "real" ? (
                   <div className="mt-2.5">
                     <p className="text-[12.5px] text-fg-muted">
-                      Now run the agents — they&apos;ll triage these with a live model:
+                      Now run the agents, they&apos;ll triage these with a live model:
                     </p>
                     <pre className="mono mt-1.5 overflow-x-auto rounded-md bg-sunken px-2.5 py-2 text-[11px] leading-relaxed">
 {result.org_ids.map((o) => `cd orgs/${o} && uv run flwr run . --stream`).join("\n")}
@@ -392,12 +392,12 @@ export default function Home() {
                     {result.detected.length} signature
                     {result.detected.length === 1 ? "" : "s"} released ·{" "}
                     {result.match_ids.length > 0
-                      ? "correlated — see step 4"
+                      ? "correlated, see step 4"
                       : "no correlation (single org)"}
                   </p>
                 ) : (
                   <p className="mt-1.5 text-[12.5px] text-fg-muted">
-                    Nothing escalated — every row read as background noise.
+                    Nothing escalated, every row read as background noise.
                   </p>
                 )}
               </div>
@@ -410,7 +410,7 @@ export default function Home() {
         <Act
           n={3}
           title="Each one works it out alone"
-          blurb="Every agent reasons over only its own log. What leaves is never a log line — just a technique, a one-way hash of the indicator, a time window and a confidence."
+          blurb="Every agent reasons over only its own log. What leaves is never a log line, just a technique, a one-way hash of the indicator, a time window and a confidence."
           state={stateOf(2)}
           status={
             <ActChip
@@ -426,7 +426,7 @@ export default function Home() {
               <div className="mb-2.5 flex flex-wrap items-center gap-2">
                 <span className="label">
                   {anyRunning
-                    ? "Real Flower agents running — each reading only its own log"
+                    ? "Real Flower agents running, each reading only its own log"
                     : "Agents finished"}
                 </span>
                 {anyRunning ? (
@@ -465,7 +465,7 @@ export default function Home() {
               </p>
               <p className="mt-1 text-[12.5px] text-fg-muted">
                 Each org packages its own Flower app and reasons over its own telemetry
-                with a live model. Takes a minute or two — you&apos;ll see every
+                with a live model. Takes a minute or two, you&apos;ll see every
                 verdict as it happens.
               </p>
               <button
@@ -527,7 +527,7 @@ export default function Home() {
         <Act
           n={4}
           title="The mesh spots the overlap"
-          blurb="Two orgs hashed the same indicator independently and produced the same value — without either seeing the other's data. Matching is deterministic; no model is involved."
+          blurb="Two orgs hashed the same indicator independently and produced the same value, without either seeing the other's data. Matching is deterministic; no model is involved."
           state={stateOf(3)}
           status={
             <ActChip
@@ -564,7 +564,7 @@ export default function Home() {
             </div>
           ) : hasSignatures ? (
             <p className="text-[13px]" style={{ color: "var(--local)" }}>
-              No correlation — only one organisation saw this. Nothing crosses a boundary,
+              No correlation, only one organisation saw this. Nothing crosses a boundary,
               and no human is interrupted.
             </p>
           ) : (
@@ -574,8 +574,8 @@ export default function Home() {
 
         <Act
           n={5}
-          title="First gate — a human decides what crosses"
-          blurb="The match is held. Below is the complete disclosure — not a summary of it. Nothing moves until a person approves."
+          title="First gate, a human decides what crosses"
+          blurb="The match is held. Below is the complete disclosure, not a summary of it. Nothing moves until a person approves."
           state={stateOf(4)}
           status={
             <ActChip
@@ -595,8 +595,8 @@ export default function Home() {
 
         <Act
           n={6}
-          title="Second gate — each org decides whether to act"
-          blurb="Gate 1 only allowed the indicator to be shared. It did not oblige anyone to do anything with it. Each organisation's own analyst now decides separately whether to act on it in their environment — and one declining has no effect on the others."
+          title="Second gate, each org decides whether to act"
+          blurb="Gate 1 only allowed the indicator to be shared. It did not oblige anyone to do anything with it. Each organisation's own analyst now decides separately whether to act on it in their environment, and one declining has no effect on the others."
           state={stateOf(5)}
           status={
             <ActChip
@@ -679,7 +679,7 @@ function DisclosureCard({ match, onDone }: { match: MatchRecord; onDone: () => v
         <div>
           <dt className="label">indicator hash</dt>
           <dd className="mono mt-0.5 text-[15px] font-medium">
-            {match.indicator_hash ?? "—"}
+            {match.indicator_hash ?? "·"}
           </dd>
         </div>
         <div>
@@ -706,16 +706,16 @@ function DisclosureCard({ match, onDone }: { match: MatchRecord; onDone: () => v
             disabled={!!busy}
             onClick={() => void act("approve")}
           >
-            {busy === "approve" ? "Approving…" : `Approve — disclose to ${match.org_ids.length} orgs`}
+            {busy === "approve" ? "Approving…" : `Approve: disclose to ${match.org_ids.length} orgs`}
           </button>
           <button className="btn flex-1" disabled={!!busy} onClick={() => void act("reject")}>
-            Reject — keep it contained
+            Reject: keep it contained
           </button>
         </div>
       ) : (
         <p className="mt-3 text-[12.5px] text-fg-muted">
           {match.status === "rejected"
-            ? "Rejected — this never crossed a boundary."
+            ? "Rejected, this never crossed a boundary."
             : "Approved by a human. Each org now decides its own action."}
         </p>
       )}
@@ -764,14 +764,14 @@ function LocalActions({ match, onDone }: { match: MatchRecord; onDone: () => voi
         <p className="label mb-1">The decision each analyst is being asked to make</p>
         <p className="text-[12.5px] leading-relaxed text-fg-muted">
           &ldquo;We&apos;ve been told indicator{" "}
-          <code className="mono">{match.indicator_hash ?? "—"}</code> was seen at another
+          <code className="mono">{match.indicator_hash ?? "·"}</code> was seen at another
           organisation. Do we block it at our perimeter and sweep our own history for
           it?&rdquo;
         </p>
         <p className="mt-1.5 text-[11.5px] text-fg-subtle">
           Acting runs a real retro-hunt: that org re-scans its <em>own</em> log, hashing
           each token and comparing, so it can find events it missed without ever being
-          told what the indicator is. The block itself is recorded as a decision — this
+          told what the indicator is. The block itself is recorded as a decision, this
           dashboard doesn&apos;t touch anyone&apos;s firewall.
         </p>
       </div>
@@ -835,8 +835,8 @@ function LocalActions({ match, onDone }: { match: MatchRecord; onDone: () => voi
                     style={{ color: hits.length ? "var(--crossed)" : "var(--local)" }}
                   >
                     {hits.length === 0
-                      ? "Swept own history — no trace of this indicator here."
-                      : `Swept own history — ${hits.length} matching event${
+                      ? "Swept own history, no trace of this indicator here."
+                      : `Swept own history, ${hits.length} matching event${
                           hits.length === 1 ? "" : "s"
                         } found.`}
                   </p>
@@ -853,7 +853,7 @@ function LocalActions({ match, onDone }: { match: MatchRecord; onDone: () => voi
                         ))}
                       </ul>
                       <p className="mt-1.5 text-[11px] leading-relaxed text-fg-subtle">
-                        Found by hashing its own log tokens and comparing — this org was
+                        Found by hashing its own log tokens and comparing, this org was
                         never told what the indicator is.
                       </p>
                     </>
@@ -868,13 +868,13 @@ function LocalActions({ match, onDone }: { match: MatchRecord; onDone: () => voi
       <p className="mt-3 border-t border-line pt-2.5 text-[12.5px] leading-relaxed">
         {match.status === "resolved" ? (
           <span style={{ color: "var(--local)" }}>
-            All {match.org_ids.length} organisations chose to act. Resolved — an attack
+            All {match.org_ids.length} organisations chose to act. Resolved, an attack
             that hit them separately is now being handled by both, and neither ever saw
             the other&apos;s data.
           </span>
         ) : decided === match.org_ids.length ? (
           <span className="text-fg-muted">
-            All decided — {acting} of {match.org_ids.length} chose to act. The match stays
+            All decided, {acting} of {match.org_ids.length} chose to act. The match stays
             approved: one org declining doesn&apos;t undo anyone else&apos;s decision.
           </span>
         ) : (

@@ -127,7 +127,7 @@ export default function AttackConsolePage() {
           <p className="text-[13.5px] leading-relaxed text-fg-muted">
             You are in <strong className="text-fg">real mode</strong>. Real organisations
             run their own Flower agent on their own infrastructure and only ever POST a
-            stripped signature in — nothing here injects events into their logs. The
+            stripped signature in. Nothing here injects events into their logs. The
             server is a passive correlator: it names each org that reports, matches
             across them, and holds every disclosure for human approval, exactly as in
             the demo.
@@ -148,7 +148,7 @@ export default function AttackConsolePage() {
         </h1>
         <p className="mt-1.5 max-w-[68ch] text-[14px] leading-relaxed text-fg-muted">
           Launching a scenario writes real events into the targeted organisations&apos;
-          own log files. From that point the ordinary pipeline runs over them — the
+          own log files. From that point the ordinary pipeline runs over them, the
           orgs have to find the attack in their own telemetry, the same way they would
           any other day.
         </p>
@@ -179,7 +179,7 @@ export default function AttackConsolePage() {
               <p className="text-[12.5px] leading-relaxed text-fg-muted">
                 <strong className="text-fg">Real agents.</strong> The attack is written
                 into each org&apos;s log and nothing else happens here. You then run the
-                Flower agents yourself — they call a live model to triage every line,
+                Flower agents yourself. They call a live model to triage every line,
                 extract and hash the indicator, and submit. Fully end-to-end, and the
                 terminal output is part of the proof.
               </p>
@@ -190,7 +190,7 @@ export default function AttackConsolePage() {
                 <em>deterministic rule-based detector</em> stands in for the LLM triage
                 step so the demo runs in seconds instead of minutes. It still reads the
                 real rows and derives and hashes the indicator with the same function
-                the agents use — and correlation is the real matching algorithm either
+                the agents use, and correlation is the real matching algorithm either
                 way. Signatures produced this way are badged{" "}
                 <span className="chip chip-idle" style={{ fontSize: 10 }}>
                   simulated
@@ -271,7 +271,7 @@ export default function AttackConsolePage() {
         <p className="mt-1.5 text-[12.5px] leading-relaxed text-fg-muted">
           Pick which demo orgs get hit and the shared attacker indicator they all
           reach. Each selected org gets one encoded-PowerShell beacon row to that
-          indicator — so two or more orgs correlate on its hash, exactly like the
+          indicator, so two or more orgs correlate on its hash, exactly like the
           built-in campaign, but with values you choose.
         </p>
 
@@ -330,7 +330,7 @@ export default function AttackConsolePage() {
         </div>
         {customOrgs.length < 2 && (
           <p className="mt-2 text-[11.5px] text-fg-subtle">
-            One org alone won&apos;t correlate — pick two or more to see a match form.
+            One org alone won&apos;t correlate. Pick two or more to see a match form.
           </p>
         )}
       </section>
@@ -373,7 +373,7 @@ export default function AttackConsolePage() {
             </div>
           ) : result.detected.length === 0 ? (
             <p className="mt-3 text-[12.5px] text-fg-muted">
-              Nothing was escalated — every row read as ordinary background noise.
+              Nothing was escalated, every row read as ordinary background noise.
             </p>
           ) : (
             <div className="mt-3">
@@ -402,7 +402,7 @@ export default function AttackConsolePage() {
               </ul>
               {result.match_ids.length === 0 && (
                 <p className="mt-2 text-[12.5px]" style={{ color: "var(--local)" }}>
-                  No correlation — only one organisation saw this. Nothing crosses a
+                  No correlation, only one organisation saw this. Nothing crosses a
                   boundary, and nothing is asked of a human.
                 </p>
               )}

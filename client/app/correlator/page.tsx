@@ -22,7 +22,7 @@ export default function CorrelatorPage() {
     let max = Math.max(...ends);
     if (!Number.isFinite(min) || !Number.isFinite(max)) return null;
     if (max - min < 60_000) {
-      // A single instant would collapse to zero width — give it breathing room.
+      // A single instant would collapse to zero width, give it breathing room.
       min -= 15 * 60_000;
       max += 15 * 60_000;
     }
@@ -35,7 +35,7 @@ export default function CorrelatorPage() {
     return ((Date.parse(iso) - bounds.min) / (bounds.max - bounds.min)) * 100;
   };
 
-  // Hashes independently reported by more than one org — the strong correlation signal.
+  // Hashes independently reported by more than one org, the strong correlation signal.
   const collisions = useMemo(() => {
     const byHash = new Map<string, SignatureRecord[]>();
     for (const s of signatures) {
@@ -69,7 +69,7 @@ export default function CorrelatorPage() {
         </h1>
         <p className="mt-1.5 max-w-[64ch] text-[14px] leading-relaxed text-fg-muted">
           Every signature the mesh has received, on one time axis. Matching here is
-          deterministic — identical indicator hashes, or a shared technique with
+          deterministic: identical indicator hashes, or a shared technique with
           overlapping windows. No model is involved in this step.
         </p>
       </header>
@@ -167,7 +167,7 @@ export default function CorrelatorPage() {
                       </div>
                       <p className="mt-2 text-[12px] leading-relaxed text-fg-muted">
                         {c.orgs.map(orgLabel).join(" and ")} independently hashed the same
-                        indicator and produced the same value — without either seeing the
+                        indicator and produced the same value, without either seeing the
                         other&apos;s data.
                       </p>
                     </li>

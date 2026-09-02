@@ -51,7 +51,7 @@ export default function OrgNodePage(props: PageProps<"/org/[id]">) {
       </header>
 
       <div className="mt-6 grid gap-3 sm:grid-cols-3 rise">
-        <Stat label="Events processed locally" value={rawCount || "—"} tone="local" />
+        <Stat label="Events processed locally" value={rawCount || "·"} tone="local" />
         <Stat label="Signatures released" value={mine.length} />
         <Stat label="Raw fields disclosed" value={0} tone="local" note="by construction" />
       </div>
@@ -84,7 +84,7 @@ export default function OrgNodePage(props: PageProps<"/org/[id]">) {
               <p className="mt-2 text-[12px] text-fg-muted">
                 This panel reads <code className="mono">orgs/{id}/data/mock_log.jsonl</code>{" "}
                 via the server&apos;s convenience endpoint. The privacy boundary is
-                unaffected — this view is only for showing what stayed put.
+                unaffected. This view is only for showing what stayed put.
               </p>
             </div>
           ) : !log ? (
@@ -171,7 +171,7 @@ export default function OrgNodePage(props: PageProps<"/org/[id]">) {
                     </dl>
 
                     <p className="mt-2 border-t border-line pt-2 text-[11.5px] leading-relaxed text-fg-subtle">
-                      No hostname, username, IP, or domain — the indicator is a one-way
+                      No hostname, username, IP, or domain, the indicator is a one-way
                       hash computed on this node before sending.
                     </p>
                   </li>

@@ -25,7 +25,7 @@ import {
 } from "@/lib/api";
 
 /**
- * The guided walkthrough — one stage on screen at a time, in the order the
+ * The guided walkthrough, one stage on screen at a time, in the order the
  * story actually happens.
  *
  * The six-act home page shows the same sequence, but as one long scroll with
@@ -38,7 +38,7 @@ import {
  * only to colour the progress rail and to tell the control scenario (which
  * correctly produces no match) apart from one that is still waiting.
  *
- * Nothing here fabricates progress — every stage reads the same endpoints every
+ * Nothing here fabricates progress, every stage reads the same endpoints every
  * other page reads.
  */
 
@@ -49,7 +49,7 @@ type Copy = string | ((s: Ctx) => string);
 interface Stage {
   id: string;
   title: Copy;
-  /** Read this out. Deliberately short — a slide note, not a script. */
+  /** Read this out. Deliberately short, a slide note, not a script. */
   say: Copy;
   /** True once the real server state has satisfied this stage. */
   done: (s: Ctx) => boolean;
@@ -85,13 +85,13 @@ const STAGES: Stage[] = [
     id: "attack",
     title: (s) =>
       s.scenario
-        ? `${s.scenario.name} — ${s.scenario.org_ids.length} organisation${s.scenario.org_ids.length === 1 ? "" : "s"}`
+        ? `${s.scenario.name}, ${s.scenario.org_ids.length} organisation${s.scenario.org_ids.length === 1 ? "" : "s"}`
         : "The attack arrives",
     say: (s) =>
       (s.scenario?.summary ??
         "Launching a scenario writes real events into the targeted organisations' own log files.") +
-      " Nothing is pre-staged — from here each org has to find it in its own telemetry.",
-    // NOT "the logs have rows in them" — every org starts with a baseline log,
+      " Nothing is pre-staged. From here each org has to find it in its own telemetry.",
+    // NOT "the logs have rows in them", every org starts with a baseline log,
     // so that was true immediately and the demo skipped straight past this
     // stage on load.
     done: (s) => s.delivered,
@@ -99,16 +99,16 @@ const STAGES: Stage[] = [
   {
     id: "reason",
     title: "Each one works it out alone",
-    say: "Each agent runs a live model over its own log and decides what matters. What leaves the box is never a log line — only a technique, a one-way hash, and a time window.",
+    say: "Each agent runs a live model over its own log and decides what matters. What leaves the box is never a log line, only a technique, a one-way hash, and a time window.",
     done: (s) => s.signatures > 0,
   },
   {
     id: "correlate",
-    title: (s) => (isControl(s) ? "Nothing correlates — correctly" : "The overlap appears"),
+    title: (s) => (isControl(s) ? "Nothing correlates, and that is correct" : "The overlap appears"),
     say: (s) =>
       isControl(s)
         ? "Only one organisation saw this. There is nothing to correlate, and the mesh says so rather than inventing a link. A system that finds a pattern in every input is not detecting anything."
-        : "Each hashed the same attacker infrastructure independently and got the same value, without either seeing the other's data. The match is deterministic — no model decides what correlates.",
+        : "Each hashed the same attacker infrastructure independently and got the same value, without either seeing the other's data. The match is deterministic. No model decides what correlates.",
     // The control has no match to reach, so it is complete once the agents have
     // finished and declined to produce one.
     done: (s) => (isControl(s) ? s.agentsFinished || s.signatures > 0 : s.match !== null),
@@ -116,7 +116,7 @@ const STAGES: Stage[] = [
   {
     id: "disclose",
     title: "Nothing crosses without a human",
-    say: "This is the entire disclosure. Not a summary of it — all of it. Four fields. No log lines, no hostnames, no usernames, no IP addresses. Nothing moves until a person approves it.",
+    say: "This is the entire disclosure. Not a summary of it, all of it. Four fields. No log lines, no hostnames, no usernames, no IP addresses. Nothing moves until a person approves it.",
     done: (s) => s.approved,
   },
   {
@@ -128,7 +128,7 @@ const STAGES: Stage[] = [
   {
     id: "close",
     title: "Three private log files, one shared attack",
-    say: "Three companies, three private logs, one shared attacker caught — and a human said yes twice before anything moved.",
+    say: "Three companies, three private logs, one shared attacker caught, and a human said yes twice before anything moved.",
     done: () => false,
   },
 ];
@@ -147,7 +147,7 @@ export default function GuidedDemo() {
   const [launched, setLaunched] = useState(false);
   // Whether the delivered attack used the stand-in detector. The fallback path
   // creates signatures instantly and starts no agents, so stage 3 has to say
-  // that rather than offering a "Run the agents" button over empty panels —
+  // that rather than offering a "Run the agents" button over empty panels ,
   // clicking it mid-fallback starts the slow path you were avoiding.
   const [simulatedRun, setSimulatedRun] = useState(false);
   const [scenarios, setScenarios] = useState<AttackScenario[]>([]);
@@ -364,7 +364,7 @@ export default function GuidedDemo() {
           className="panel mt-4 px-4 py-2.5 text-[13px]"
           style={{ borderColor: "color-mix(in srgb, var(--crossed) 40%, transparent)" }}
         >
-          Correlation server unreachable — start it with{" "}
+          Correlation server unreachable, start it with{" "}
           <code className="mono">
             cd server &amp;&amp; uv run uvicorn server.main:app --port 8000
           </code>
@@ -376,8 +376,7 @@ export default function GuidedDemo() {
         </p>
       )}
 
-      {/* Stage body. Centred vertically because stages differ a lot in height —
-          left top-aligned, a sparse stage leaves a large void above the footer,
+      {/* Stage body. Centred vertically because stages differ a lot in height,           left top-aligned, a sparse stage leaves a large void above the footer,
           which reads as a broken page when projected. */}
       <main className="mt-6 flex flex-1 flex-col justify-center py-2">
         {stage.id === "sealed" && <Sealed logs={logs} orgIds={orgIds} />}
@@ -513,7 +512,7 @@ function Attack({
   return (
     <div className="grid gap-5">
       {/* Scenario choice. The one-org scenario is the control and is labelled
-          as such — it is supposed to produce no match, and showing that the
+          as such, it is supposed to produce no match, and showing that the
           mesh declines to invent a correlation is worth as much as showing it
           find one. */}
       <div className="grid gap-2.5 sm:grid-cols-2 lg:grid-cols-4">
@@ -539,7 +538,7 @@ function Attack({
               </div>
               <p className="mt-1 text-[13.5px] font-medium leading-snug">{s.name}</p>
               {control && (
-                <span className="chip chip-idle mt-2">control — expect no match</span>
+                <span className="chip chip-idle mt-2">control, expect no match</span>
               )}
             </button>
           );
@@ -638,7 +637,7 @@ function Reason({
             <>
               <span className="chip chip-idle mr-2">simulated</span>
               A deterministic detector stood in for the model step. It read the
-              same rows and derived the same indicator — correlation and both
+              same rows and derived the same indicator, correlation and both
               approval gates below are the real code.
             </>
           ) : (
@@ -658,7 +657,7 @@ function Reason({
             className={simulated ? "btn" : "btn btn-primary"}
             onClick={onRunAgents}
             disabled={starting || anyRunning}
-            title={simulated ? "Runs the real Flower agents — slower" : undefined}
+            title={simulated ? "Runs the real Flower agents, slower" : undefined}
           >
             {starting
               ? "Starting…"
@@ -679,7 +678,7 @@ function Reason({
         </div>
       )}
 
-      {/* held vs released — the whole privacy claim, side by side */}
+      {/* held vs released, the whole privacy claim, side by side */}
       <div className="grid gap-3 sm:grid-cols-3">
         {orgIds.map((id) => {
           const mine = signatures.filter((s) => s.org_id === id);
@@ -725,7 +724,7 @@ function Correlate({
 }) {
   // The control scenario hits one organisation. Producing no match is the
   // correct answer, and showing that the mesh declines to invent a link is
-  // worth as much as showing it find one — so it gets a result panel, not an
+  // worth as much as showing it find one, so it gets a result panel, not an
   // empty state.
   if (control && !match) {
     const orgs = new Set(signatures.map((s) => s.org_id));
@@ -735,13 +734,13 @@ function Correlate({
           className="panel p-6"
           style={{ borderColor: "color-mix(in srgb, var(--local) 45%, transparent)" }}
         >
-          <p className="label">Result — no correlation</p>
+          <p className="label">Result, no correlation</p>
           <p className="mt-2 text-[clamp(1.2rem,3vw,1.7rem)] font-semibold">
             {orgs.size} organisation{orgs.size === 1 ? "" : "s"} affected, no match
             created
           </p>
           <p className="mt-3 max-w-[70ch] text-[13.5px] leading-relaxed text-fg-muted">
-            The agent escalated this locally and released a signature — the
+            The agent escalated this locally and released a signature, the
             attack was real and it was detected. But nobody else saw the same
             indicator, so there is nothing to correlate and no disclosure to
             approve. A system that finds a pattern in every input is not
@@ -752,7 +751,7 @@ function Correlate({
     );
   }
   if (!match) {
-    // Waiting is part of the story — one org reporting alone is exactly the
+    // Waiting is part of the story, one org reporting alone is exactly the
     // situation this system exists to fix, so show it rather than a bare
     // "nothing yet".
     const byOrg = new Map<string, number>();
@@ -763,7 +762,7 @@ function Correlate({
           <p className="label">Waiting for a second organisation</p>
           <p className="mt-2 max-w-[70ch] text-[13.5px] leading-relaxed text-fg-muted">
             A match needs at least two organisations to have independently
-            produced the same indicator — or the same technique in overlapping
+            produced the same indicator, or the same technique in overlapping
             windows. One organisation reporting alone is precisely the blind spot
             this exists to close.
           </p>
@@ -794,7 +793,7 @@ function Correlate({
           className="mono mt-2 break-all text-[clamp(1.3rem,4vw,2.1rem)] font-semibold"
           style={{ color: "var(--hold)" }}
         >
-          {match.indicator_hash ?? "—"}
+          {match.indicator_hash ?? "·"}
         </p>
         <div className="mt-4 grid gap-2">
           {contributing.map((s) => (
@@ -811,7 +810,7 @@ function Correlate({
         <p className="mt-4 max-w-[70ch] text-[12.5px] text-fg-muted">
           Neither organisation sent the other a message. Each hashed what it saw
           with a key the correlator does not hold, and a third party noticed the
-          two values were equal. Matching is exact equality — a model never
+          two values were equal. Matching is exact equality, a model never
           decides what correlates.
         </p>
       </section>
@@ -841,7 +840,7 @@ function Disclose({
         className="panel p-6"
         style={{ borderColor: "color-mix(in srgb, var(--hold) 45%, transparent)" }}
       >
-        <p className="label">The complete disclosure — all of it</p>
+        <p className="label">The complete disclosure, all of it</p>
         <dl className="mt-4 grid gap-3 sm:grid-cols-2">
           {fields.map(([k, v]) => (
             <div key={k} className="border-t border-line pt-2.5">
@@ -882,7 +881,7 @@ function ActStage({
       </p>
     );
   }
-  // Sized to however many orgs are actually in this match — a fixed three-column
+  // Sized to however many orgs are actually in this match, a fixed three-column
   // grid leaves a dead column whenever only two organisations correlated.
   const cols = Math.min(match.org_ids.length, 3);
   return (
@@ -938,7 +937,7 @@ function Close({ match, signatures }: { match: MatchRecord | null; signatures: n
       <section className="panel p-6">
         <p className="max-w-[72ch] text-[14px] leading-relaxed">
           Local reasoning, deterministic correlation, and a human decision before
-          anything crosses an organisational boundary — twice. Built on Flower
+          anything crosses an organisational boundary, twice. Built on Flower
           Agent: each organisation runs its own AgentApp, and there is no
           agent-to-agent channel to abuse because none exists.
         </p>

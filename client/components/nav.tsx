@@ -123,7 +123,7 @@ function LinkStatus({ state }: { state: "connecting" | "online" | "offline" }) {
       className="hidden items-center gap-2 rounded-lg border border-line px-2.5 py-1 sm:inline-flex"
       title={
         state === "offline"
-          ? "Cannot reach the correlation server — is it running on port 8000?"
+          ? "Cannot reach the correlation server. Is it running on port 8000?"
           : "Polling the correlation server"
       }
     >

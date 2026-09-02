@@ -37,37 +37,37 @@ export const DEMO_STEPS: DemoStep[] = [
   {
     id: "isolation",
     title: "Three organisations, each sealed",
-    say: "Three separate companies. Three separate Flower agents, each reading only its own security log. No shared database, no pooled telemetry — today they have no way to know they're being hit by the same attacker.",
+    say: "Three separate companies. Three separate Flower agents, each reading only its own security log. No shared database, no pooled telemetry, today they have no way to know they're being hit by the same attacker.",
     route: "/",
   },
   {
     id: "attack",
     title: "The same attacker hits two of them",
-    say: "The same phishing lure lands at two of them, hours apart. This writes real events into their actual log files — nothing is pre-staged.",
+    say: "The same phishing lure lands at two of them, hours apart. This writes real events into their actual log files, nothing is pre-staged.",
     route: "/",
   },
   {
     id: "local",
     title: "Each works it out alone",
-    say: "Each agent runs a model over its own log and decides what matters. What leaves the box is never a log line — just a technique, a one-way hash, a time window.",
+    say: "Each agent runs a model over its own log and decides what matters. What leaves the box is never a log line. Only a technique, a one-way hash, a time window.",
     route: "/",
   },
   {
     id: "correlate",
     title: "The overlap appears",
-    say: "Both hashed the same attacker domain independently and got the same value — without either seeing the other's data. That match is deterministic, not a model guess. This is the moment neither company could reach on its own.",
+    say: "Both hashed the same attacker domain independently and got the same value, without either seeing the other's data. That match is deterministic, not a model guess. This is the moment neither company could reach on its own.",
     route: "/",
   },
   {
     id: "approve",
     title: "Nothing crosses without a human",
-    say: "Here is the entire disclosure — four fields. Not a summary of it, all of it. No raw logs, no hostnames, no usernames, no IPs. Nothing moves until a person approves it. This is the safety and oversight story.",
+    say: "Here is the entire disclosure, four fields. Not a summary of it, all of it. No raw logs, no hostnames, no usernames, no IPs. Nothing moves until a person approves it. This is the safety and oversight story.",
     route: "/",
   },
   {
     id: "resolve",
     title: "And each org still decides for itself",
-    say: "Approval to disclose isn't approval to act. Every org approves its own follow-up separately. Two human gates. Three companies, one shared attack caught — and a human said yes twice before anything moved.",
+    say: "Approval to disclose isn't approval to act. Every org approves its own follow-up separately. Two human gates. Three companies, one shared attack caught, and a human said yes twice before anything moved.",
     route: "/",
   },
 ];
@@ -103,7 +103,7 @@ export function DemoProvider({ children }: { children: ReactNode }) {
       const raw = localStorage.getItem(SIMULATED_KEY);
       if (raw) setSimulatedIds(new Set(JSON.parse(raw) as string[]));
     } catch {
-      /* storage unavailable — badges just won't persist */
+      /* storage unavailable, badges just won't persist */
     }
   }, []);
 

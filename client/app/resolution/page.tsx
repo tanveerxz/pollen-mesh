@@ -16,8 +16,7 @@ export default function ResolutionPage() {
         </h1>
         <p className="mt-1.5 max-w-[64ch] text-[14px] leading-relaxed text-fg-muted">
           Approving a disclosure is not the same as approving an action. Each
-          organisation decides independently whether to act on what it just learned —
-          and one declining has no bearing on the others.
+          organisation decides independently whether to act on what it just learned,           and one declining has no bearing on the others.
         </p>
       </header>
 
@@ -174,7 +173,7 @@ function MatchCard({ match }: { match: MatchRecord }) {
 
       {decided > 0 && !resolved && (
         <p className="border-t border-line px-5 py-3 text-[12px] text-fg-subtle">
-          One org declining does not revert the disclosure — the others still act on what
+          One org declining does not revert the disclosure, the others still act on what
           they learned.
         </p>
       )}

@@ -27,7 +27,7 @@ export function AgentLive({ run }: { run: AgentRun }) {
   const running = run.status === "running";
 
   // A single row can emit several events (escalate, then released/kept local),
-  // so progress must count distinct rows seen — not events.
+  // so progress must count distinct rows seen, not events.
   const rowsSeen = new Set(
     run.events.filter((e) => e.row !== null).map((e) => e.row),
   ).size;
@@ -105,7 +105,7 @@ export function AgentLive({ run }: { run: AgentRun }) {
       <ul className="scroll-thin flex-1 overflow-y-auto" style={{ maxHeight: 300 }}>
         {shown.length === 0 ? (
           <li className="px-3.5 py-6 text-center text-[12px] text-fg-subtle">
-            Starting up — packaging the app and installing its environment…
+            Starting up. Packaging the app and installing its environment…
           </li>
         ) : (
           shown.map((e, i) => <EventRow key={`${e.at}-${i}`} event={e} />)
